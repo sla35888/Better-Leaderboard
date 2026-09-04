@@ -390,41 +390,24 @@ local tdCorner = Instance.new("UICorner")
 tdCorner.CornerRadius = UDim.new(0, 4)
 tdCorner.Parent = toggleDimensionBtn
 
-local displayNameContainer = Instance.new("Frame")
-displayNameContainer.Name = "DisplayNameContainer"
-displayNameContainer.Size = UDim2.new(1, -115, 0, 20)
-displayNameContainer.Position = UDim2.new(0, 105, 0, 12)
-displayNameContainer.BackgroundTransparency = 1
-displayNameContainer.Parent = profileContentGroup
-
-local displayLayout = Instance.new("UIListLayout")
-displayLayout.FillDirection = Enum.FillDirection.Horizontal
-displayLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-displayLayout.SortOrder = Enum.SortOrder.LayoutOrder
-displayLayout.Padding = UDim.new(0, 4)
-displayLayout.Parent = displayNameContainer
-
 local displayLabel = Instance.new("TextLabel")
-displayLabel.Name = "DisplayLabel"
-displayLabel.Size = UDim2.new(0, 0, 1, 0)
-displayLabel.AutomaticSize = Enum.AutomaticSize.X
+displayLabel.Size = UDim2.new(1, -115, 0, 20)
+displayLabel.Position = UDim2.new(0, 105, 0, 12)
 displayLabel.BackgroundTransparency = 1
 displayLabel.TextColor3 = currentTheme.TEXT
 displayLabel.TextSize = isMobile and 13 or 12
 displayLabel.Font = Enum.Font.BuilderSansBold
 displayLabel.TextXAlignment = Enum.TextXAlignment.Left
 displayLabel.TextTruncate = Enum.TextTruncate.AtEnd
-displayLabel.LayoutOrder = 1
-displayLabel.Parent = displayNameContainer
+displayLabel.Parent = profileContentGroup
 
 local profileVerifiedIcon = Instance.new("ImageLabel")
-profileVerifiedIcon.Name = "VerifiedBadge"
+profileVerifiedIcon.Name = "ProfileVerifiedIcon"
 profileVerifiedIcon.Size = UDim2.new(0, 14, 0, 14)
 profileVerifiedIcon.BackgroundTransparency = 1
 profileVerifiedIcon.Image = "rbxassetid://11478378840"
 profileVerifiedIcon.Visible = false
-profileVerifiedIcon.LayoutOrder = 2
-profileVerifiedIcon.Parent = displayNameContainer
+profileVerifiedIcon.Parent = profileContentGroup
 
 local usernameLabel = Instance.new("TextLabel")
 usernameLabel.Size = UDim2.new(1, -115, 0, 16)
@@ -1096,6 +1079,9 @@ updatePlayerRowOnly = function(plr)
 	if not row then return false end
 	
 	local activeStats = getGameStatsList()
+	local numStats = activeStats and #activeStats or 0
+	local statWidth = 42
+	local badgesWidth = 45
 
 	if activeStats then
 		for i, statName in ipairs(activeStats) do
@@ -1127,6 +1113,7 @@ updatePlayerList = function(showLoading)
 	end
 
 	pcall(function()
+		-- Desativa ajuste automático durante reestruturação para evitar travamentos e mudanças abruptas no scroll
 		scrollingPlayers.AutomaticCanvasSize = Enum.AutomaticSize.None
 
 		for _, child in ipairs(scrollingPlayers:GetChildren()) do
@@ -1237,24 +1224,10 @@ updatePlayerList = function(showLoading)
 			local badgesWidth = 45
 			local nameWidthOffset = (numStats * statWidth) + badgesWidth + 40
 			
-			local nameContainer = Instance.new("Frame")
-			nameContainer.Name = "NameContainer"
-			nameContainer.Size = UDim2.new(1, -nameWidthOffset, 1, 0)
-			nameContainer.Position = UDim2.new(0, 36, 0, 0)
-			nameContainer.BackgroundTransparency = 1
-			nameContainer.Parent = row
-
-			local nameLayout = Instance.new("UIListLayout")
-			nameLayout.FillDirection = Enum.FillDirection.Horizontal
-			nameLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-			nameLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			nameLayout.Padding = UDim.new(0, 4)
-			nameLayout.Parent = nameContainer
-
 			local nameTxt = Instance.new("TextLabel")
 			nameTxt.Name = "NameTxt"
-			nameTxt.Size = UDim2.new(0, 0, 1, 0)
-			nameTxt.AutomaticSize = Enum.AutomaticSize.X
+			nameTxt.Size = UDim2.new(1, -nameWidthOffset, 1, 0)
+			nameTxt.Position = UDim2.new(0, 36, 0, 0)
 			nameTxt.BackgroundTransparency = 1
 			nameTxt.Text = plr.DisplayName
 			nameTxt.TextColor3 = currentTheme.TEXT
@@ -1262,19 +1235,21 @@ updatePlayerList = function(showLoading)
 			nameTxt.Font = Enum.Font.BuilderSansMedium
 			nameTxt.TextXAlignment = Enum.TextXAlignment.Left
 			nameTxt.TextTruncate = Enum.TextTruncate.AtEnd
-			nameTxt.LayoutOrder = 1
-			nameTxt.Parent = nameContainer
+			nameTxt.Parent = row
 			
 			if plr.HasVerifiedBadge then
-				local verifiedIcon = Instance.new("ImageLabel")
-				verifiedIcon.Name = "VerifiedIcon"
-				verifiedIcon.Size = UDim2.new(0, 12, 0, 12)
-				verifiedIcon.BackgroundTransparency = 1
-				verifiedIcon.Image = "rbxassetid://11478378840"
-				verifiedIcon.LayoutOrder = 2
-				verifiedIcon.Parent = nameContainer
+				nameTxt.AutomaticSize = Enum.AutomaticSize.X
+				nameTxt.Size = UDim2.new(0, 0, 1, 0)
+				
+				local vBadgeIcon = Instance.new("ImageLabel")
+				vBadgeIcon.Name = "VerifiedBadge"
+				vBadgeIcon.Size = UDim2.new(0, 13, 0, 13)
+				vBadgeIcon.Position = UDim2.new(1, 4, 0.5, -6)
+				vBadgeIcon.BackgroundTransparency = 1
+				vBadgeIcon.Image = "rbxassetid://11478378840"
+				vBadgeIcon.Parent = nameTxt
 			end
-			
+
 			if activeStats then
 				for i, statName in ipairs(activeStats) do
 					local statTxt = Instance.new("TextLabel")
@@ -1325,14 +1300,24 @@ updatePlayerList = function(showLoading)
 					profileFullBody.Visible = true
 					
 					displayLabel.Text = plr.DisplayName
-					profileVerifiedIcon.Visible = plr.HasVerifiedBadge
-					
+					if plr.HasVerifiedBadge then
+						displayLabel.AutomaticSize = Enum.AutomaticSize.X
+						displayLabel.Size = UDim2.new(0, 0, 0, 20)
+						profileVerifiedIcon.Position = UDim2.new(0, 105 + displayLabel.AbsoluteSize.X + 4, 0, 15)
+						profileVerifiedIcon.Visible = true
+					else
+						displayLabel.AutomaticSize = Enum.AutomaticSize.None
+						displayLabel.Size = UDim2.new(1, -115, 0, 20)
+						profileVerifiedIcon.Visible = false
+					end
+
 					usernameLabel.Text = "@" .. plr.Name
 					accountCreatedLabel.Text = currentLang.Created .. getFormattedAccountAge(plr)
 					followersLabel.Text = currentLang.Followers .. "..."
 					friendsLabel.Text = currentLang.Friends .. "..."
 					profileFullBody.Image = "rbxthumb://type=Avatar&id=" .. plr.UserId .. "&w=352&h=352"
 					
+					-- Obtém a descrição via RoProxy
 					userDescriptionLabel.Text = "..."
 					task.spawn(function()
 						local descText = fetchUserDescriptionThirdParty(plr.UserId)
@@ -1341,6 +1326,7 @@ updatePlayerList = function(showLoading)
 						end
 					end)
 
+					-- Obtém contadores de seguidores e amigos
 					task.spawn(function()
 						local fers, fris = fetchFriendsAndFollowers(plr.UserId)
 						if selectedTargetPlayer == plr then
@@ -1457,6 +1443,7 @@ updatePlayerList = function(showLoading)
 			elem.Parent = scrollingPlayers
 		end
 
+		-- Reativa o redimensionamento do Canvas apenas após renderizar todos os elementos
 		scrollingPlayers.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	end)
 
@@ -1483,6 +1470,7 @@ end
 
 local function connectPlayerStats(plr)
 	plr:GetPropertyChangedSignal("Team"):Connect(function() 
+		-- Ao trocar de time, movemos apenas o player sem renderizar toda a leaderboard do zero
 		requestUpdate(false, plr) 
 	end)
 	
@@ -1490,6 +1478,7 @@ local function connectPlayerStats(plr)
 	if leaderstats then
 		for _, stat in ipairs(leaderstats:GetChildren()) do
 			stat:GetPropertyChangedSignal("Value"):Connect(function() 
+				-- Atualiza apenas os números de stats da linha da pessoa que mudou
 				requestUpdate(false, plr) 
 			end)
 		end
@@ -1521,6 +1510,7 @@ requestUpdate(true)
 
 task.spawn(function()
 	while task.wait(3) do
+		-- Atualização secundária leve periódica de estado e tempo de voz
 		if isOpen then
 			for _, plr in ipairs(Players:GetPlayers()) do
 				updatePlayerRowOnly(plr)
@@ -1575,7 +1565,7 @@ friendBtn.MouseButton1Click:Connect(function()
 end)
 
 disrespectfulBtn.MouseButton1Click:Connect(function()
-	if not selectedTargetPlayer or selectedTargetPlayer == localPlayer me return end
+	if not selectedTargetPlayer or selectedTargetPlayer == localPlayer then return end
 	local uidStr = tostring(selectedTargetPlayer.UserId)
 	if settingsData.DisrespectfulUsers[uidStr] then
 		settingsData.DisrespectfulUsers[uidStr] = nil
