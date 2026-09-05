@@ -1,3 +1,4 @@
+-- Note AI generated 
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local Teams = game:GetService("Teams")
@@ -12,6 +13,12 @@ local TeleportService = game:GetService("TeleportService")
 
 local localPlayer = Players.LocalPlayer
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
+
+--------------------------------------------------------------------------------
+-- CONSTANTES & RECURSOS
+--------------------------------------------------------------------------------
+local ROBLOX_PLUS_BADGE_ID = "rbxassetid://97038140722625"
+local VERIFIED_BADGE_ID = "rbxassetid://11478378840"
 
 --------------------------------------------------------------------------------
 -- AUTO EXECUTE AO ENTRAR / TELEPORTAR
@@ -65,6 +72,29 @@ end
 
 function HttpQueue:Clear()
 	table.clear(self.queue)
+end
+
+--------------------------------------------------------------------------------
+-- CHECAGEM DE ROBLOX PLUS / PREMIUM
+--------------------------------------------------------------------------------
+local robloxPlusCache = {}
+
+local function checkRobloxPlus(plr, callback)
+	if robloxPlusCache[plr.UserId] ~= nil then
+		callback(robloxPlusCache[plr.UserId])
+		return
+	end
+
+	-- Valida se possui Premium / Roblox Plus via API do Roblox
+	local hasPlus = false
+	pcall(function()
+		if plr.MembershipType == Enum.MembershipType.Premium then
+			hasPlus = true
+		end
+	end)
+
+	robloxPlusCache[plr.UserId] = hasPlus
+	callback(hasPlus)
 end
 
 --------------------------------------------------------------------------------
@@ -453,6 +483,19 @@ bgCorner.CornerRadius = UDim.new(0, 8)
 bgCorner.Parent = backgroundBanner
 
 --------------------------------------------------------------------------------
+-- EFEITO GRADIENTE (FADED PARA BAIXO QUE DESAPARECE NO CARD DE FUNDO)
+--------------------------------------------------------------------------------
+local bgGradient = Instance.new("UIGradient")
+bgGradient.Name = "BackgroundFadeGradient"
+bgGradient.Rotation = 90
+bgGradient.Transparency = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0),    -- Totalmente visível no topo
+	NumberSequenceKeypoint.new(0.6, 0.2), -- Transição suave
+	NumberSequenceKeypoint.new(1, 1)     -- Totalmente invisível/desaparece no limite inferior
+})
+bgGradient.Parent = backgroundBanner
+
+--------------------------------------------------------------------------------
 -- DEMAIS ELEMENTOS DO PERFIL
 --------------------------------------------------------------------------------
 local avatarContainer = Instance.new("Frame")
@@ -547,9 +590,17 @@ local profileVerifiedIcon = Instance.new("ImageLabel")
 profileVerifiedIcon.Name = "ProfileVerifiedIcon"
 profileVerifiedIcon.Size = UDim2.new(0, 12, 0, 12)
 profileVerifiedIcon.BackgroundTransparency = 1
-profileVerifiedIcon.Image = "rbxassetid://11478378840"
+profileVerifiedIcon.Image = VERIFIED_BADGE_ID
 profileVerifiedIcon.Visible = false
 profileVerifiedIcon.Parent = profileContentGroup
+
+local profilePlusIcon = Instance.new("ImageLabel")
+profilePlusIcon.Name = "ProfilePlusIcon"
+profilePlusIcon.Size = UDim2.new(0, 14, 0, 14)
+profilePlusIcon.BackgroundTransparency = 1
+profilePlusIcon.Image = ROBLOX_PLUS_BADGE_ID
+profilePlusIcon.Visible = false
+profilePlusIcon.Parent = profileContentGroup
 
 local usernameLabel = Instance.new("TextLabel")
 usernameLabel.Size = UDim2.new(1, -72, 0, 14)
@@ -873,7 +924,7 @@ local themeKeys = {"dark", "dark_red", "dark_blue", "dark_green", "dark_purple",
 local langKeys = {"en", "pt", "es"}
 
 --------------------------------------------------------------------------------
--- ANIMAÇÕES ANTIGAS RESTAURADAS (INCLUINDO EFEITO DE DESAPARECER PRA BAIXO NO CARD)
+-- ANIMAÇÕES
 --------------------------------------------------------------------------------
 local popInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 
@@ -1318,45 +1369,10 @@ local function getPlayerPrimaryStat(plr)
 end
 
 --------------------------------------------------------------------------------
--- LÓGICA DE AUTO-COMPLETE E FILTRAGEM DE PESQUISA
+-- LÓGICA DE AUTO-COMPLETE (APENAS QUANDO DAR ENTER) E FILTRAGEM
 --------------------------------------------------------------------------------
-local isAutocompleteUpdating = false
-
-local function filterAndAutocomplete()
-	if isAutocompleteUpdating then return end
-	local query = searchInput.Text
-	local queryLower = string.lower(query)
-	
-	if query ~= "" then
-		local bestMatchUsername = nil
-		
-		-- Busca por username e displayname
-		for _, plr in ipairs(Players:GetPlayers()) do
-			local uName = string.lower(plr.Name)
-			local dName = string.lower(plr.DisplayName)
-			
-			-- Se digitar letras de username ou começo de displayname
-			if string.sub(uName, 1, #queryLower) == queryLower or string.sub(dName, 1, #queryLower) == queryLower then
-				bestMatchUsername = plr.Name
-				break
-			end
-		end
-		
-		-- Auto-completa o texto com o username correspondente
-		if bestMatchUsername and #bestMatchUsername > #query then
-			isAutocompleteUpdating = true
-			local cursorPos = searchInput.CursorPosition
-			searchInput.Text = bestMatchUsername
-			if cursorPos > 0 and cursorPos <= #bestMatchUsername then
-				searchInput.SelectionStart = cursorPos
-				searchInput.CursorPosition = #bestMatchUsername + 1
-			end
-			queryLower = string.lower(bestMatchUsername)
-			isAutocompleteUpdating = false
-		end
-	end
-
-	-- Filtrar visibilidade das linhas de jogadores
+local function filterPlayersOnly()
+	local queryLower = string.lower(searchInput.Text)
 	for _, child in ipairs(scrollingPlayers:GetChildren()) do
 		if child:IsA("TextButton") and string.sub(child.Name, 1, 10) == "PlayerRow_" then
 			local uid = tonumber(string.sub(child.Name, 11))
@@ -1378,8 +1394,31 @@ local function filterAndAutocomplete()
 	end
 end
 
+-- Apenas filtra visualmente enquanto o jogador digita
 searchInput:GetPropertyChangedSignal("Text"):Connect(function()
-	filterAndAutocomplete()
+	filterPlayersOnly()
+end)
+
+-- AUTO-COMPLETA SOMENTE AO PRESSIONAR ENTER
+searchInput.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local queryLower = string.lower(searchInput.Text)
+		if queryLower ~= "" then
+			local bestMatchUsername = nil
+			for _, plr in ipairs(Players:GetPlayers()) do
+				local uName = string.lower(plr.Name)
+				local dName = string.lower(plr.DisplayName)
+				if string.sub(uName, 1, #queryLower) == queryLower or string.sub(dName, 1, #queryLower) == queryLower then
+					bestMatchUsername = plr.Name
+					break
+				end
+			end
+			if bestMatchUsername then
+				searchInput.Text = bestMatchUsername
+				filterPlayersOnly()
+			end
+		end
+	end
 end)
 
 local isUpdatingList = false
@@ -1547,18 +1586,32 @@ updatePlayerList = function(showLoading)
 			nameTxt.Font = Enum.Font.BuilderSansMedium
 			nameTxt.TextXAlignment = Enum.TextXAlignment.Left
 			nameTxt.TextTruncate = Enum.TextTruncate.AtEnd
+			nameTxt.AutomaticSize = Enum.AutomaticSize.X
 			nameTxt.Parent = row
 			
+			local badgeOffset = 3
+
+			-- Badge do Roblox Plus ao lado do DisplayName na Leaderboard
+			checkRobloxPlus(plr, function(hasPlus)
+				if hasPlus then
+					local plusBadge = Instance.new("ImageLabel")
+					plusBadge.Name = "RobloxPlusBadge"
+					plusBadge.Size = UDim2.new(0, 11, 0, 11)
+					plusBadge.Position = UDim2.new(1, badgeOffset, 0.5, -5)
+					plusBadge.BackgroundTransparency = 1
+					plusBadge.Image = ROBLOX_PLUS_BADGE_ID
+					plusBadge.Parent = nameTxt
+					badgeOffset = badgeOffset + 14
+				end
+			end)
+
 			if plr.HasVerifiedBadge then
-				nameTxt.AutomaticSize = Enum.AutomaticSize.X
-				nameTxt.Size = UDim2.new(0, 0, 1, 0)
-				
 				local vBadgeIcon = Instance.new("ImageLabel")
 				vBadgeIcon.Name = "VerifiedBadge"
 				vBadgeIcon.Size = UDim2.new(0, 11, 0, 11)
-				vBadgeIcon.Position = UDim2.new(1, 3, 0.5, -5)
+				vBadgeIcon.Position = UDim2.new(1, badgeOffset, 0.5, -5)
 				vBadgeIcon.BackgroundTransparency = 1
-				vBadgeIcon.Image = "rbxassetid://11478378840"
+				vBadgeIcon.Image = VERIFIED_BADGE_ID
 				vBadgeIcon.Parent = nameTxt
 			end
 
@@ -1610,16 +1663,27 @@ updatePlayerList = function(showLoading)
 					profileFullBody.Visible = true
 					
 					displayLabel.Text = plr.DisplayName
-					if plr.HasVerifiedBadge then
-						displayLabel.AutomaticSize = Enum.AutomaticSize.X
-						displayLabel.Size = UDim2.new(0, 0, 0, 20)
-						profileVerifiedIcon.Position = UDim2.new(0, 64 + displayLabel.AbsoluteSize.X + 4, 0, isMobile and 102 or 122)
-						profileVerifiedIcon.Visible = true
-					else
-						displayLabel.AutomaticSize = Enum.AutomaticSize.None
-						displayLabel.Size = UDim2.new(1, -72, 0, 20)
-						profileVerifiedIcon.Visible = false
-					end
+					displayLabel.AutomaticSize = Enum.AutomaticSize.X
+					displayLabel.Size = UDim2.new(0, 0, 0, 20)
+					
+					local startX = 64
+					profileVerifiedIcon.Visible = false
+					profilePlusIcon.Visible = false
+
+					-- Checagem de emblemas e ícones de verificado / Roblox Plus na Modal de Perfil
+					checkRobloxPlus(plr, function(hasPlus)
+						local currentOffset = displayLabel.AbsoluteSize.X + 4
+						if hasPlus then
+							profilePlusIcon.Position = UDim2.new(0, startX + currentOffset, 0, isMobile and 101 or 121)
+							profilePlusIcon.Visible = true
+							currentOffset = currentOffset + 18
+						end
+
+						if plr.HasVerifiedBadge then
+							profileVerifiedIcon.Position = UDim2.new(0, startX + currentOffset, 0, isMobile and 102 or 122)
+							profileVerifiedIcon.Visible = true
+						end
+					end)
 
 					usernameLabel.Text = "@" .. plr.Name
 					createdVal.Text = getFormattedAccountAge(plr)
@@ -1754,7 +1818,7 @@ updatePlayerList = function(showLoading)
 		end
 
 		scrollingPlayers.AutomaticCanvasSize = Enum.AutomaticSize.Y
-		filterAndAutocomplete()
+		filterPlayersOnly()
 	end)
 
 	hideLoadingCircle()
