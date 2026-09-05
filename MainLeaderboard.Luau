@@ -1,4 +1,3 @@
--- Note AI generated 
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local Teams = game:GetService("Teams")
@@ -75,7 +74,7 @@ function HttpQueue:Clear()
 end
 
 --------------------------------------------------------------------------------
--- CHECAGEM DE ROBLOX PLUS / PREMIUM
+-- CHECAGEM DE ROBLOX PLUS / PREMIUM / HasRobloxSubscription
 --------------------------------------------------------------------------------
 local robloxPlusCache = {}
 
@@ -85,16 +84,57 @@ local function checkRobloxPlus(plr, callback)
 		return
 	end
 
-	-- Valida se possui Premium / Roblox Plus via API do Roblox
 	local hasPlus = false
 	pcall(function()
-		if plr.MembershipType == Enum.MembershipType.Premium then
+		-- Checagem via atributo/propriedade personalizada do jogador ou assinatura padrão
+		if plr:GetAttribute("HasRobloxSubscription") ~= nil then
+			hasPlus = plr:GetAttribute("HasRobloxSubscription") == true
+		elseif plr:FindFirstChild("HasRobloxSubscription") then
+			hasPlus = plr.HasRobloxSubscription.Value == true
+		elseif plr.MembershipType == Enum.MembershipType.Premium then
 			hasPlus = true
 		end
 	end)
 
 	robloxPlusCache[plr.UserId] = hasPlus
 	callback(hasPlus)
+end
+
+--------------------------------------------------------------------------------
+-- AUXILIARES: PAÍS E EMOJIS (Country_Code)
+--------------------------------------------------------------------------------
+local function getCountryEmoji(countryCode)
+	if not countryCode or type(countryCode) ~= "string" or #countryCode ~= 2 then
+		return "🌐"
+	end
+	countryCode = string.upper(countryCode)
+	local firstLetter = string.byte(countryCode, 1) - 65 + 0x1F1E6
+	local secondLetter = string.byte(countryCode, 2) - 65 + 0x1F1E6
+	return utf8.char(firstLetter, secondLetter)
+end
+
+local function getPlayerCountry(plr)
+	local code = nil
+	pcall(function()
+		if plr:GetAttribute("Country_Code") then
+			code = plr:GetAttribute("Country_Code")
+		elseif plr:FindFirstChild("Country_Code") then
+			code = plr.Country_Code.Value
+		end
+	end)
+	return code
+end
+
+local function getPlayerAgeChecked(plr)
+	local status = "Unchecked"
+	pcall(function()
+		if plr:GetAttribute("AgeChecked") then
+			status = tostring(plr:GetAttribute("AgeChecked"))
+		elseif plr:FindFirstChild("AgeChecked") then
+			status = tostring(plr.AgeChecked.Value)
+		end
+	end)
+	return status
 end
 
 --------------------------------------------------------------------------------
@@ -214,9 +254,9 @@ local Themes = {
 }
 
 local Translations = {
-	en = {Title = "Players", SearchPlaceholder = "Search player...", AddFriend = "Add Friend", UnAddFriend = "UnAdd Friend", Block = "Block", ViewAvatar = "View Avatar", Close = "Close", Settings = "Settings", Created = "Created", Theme = "Theme", Lang = "Language", Confirm = "Confirm", VoiceActive = "Voice Active", VoiceInactive = "Last active: ", Disrespectful = "Flag User", RemoveDisrespectful = "Unflag User", BlockText = "Are you sure you want to block this user?", UnAddText = "Are you sure you want to remove this friend?", LessThanMin = "Just now", MinSecFormat = "%dm %ds ago", HourMinFormat = "%dh %dm ago", Followers = "Followers", Friends = "Friends"},
-	pt = {Title = "Jogadores", SearchPlaceholder = "Pesquisar jogador...", AddFriend = "Adicionar", UnAddFriend = "Remover", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Fechar", Settings = "Configurações", Created = "Criação", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Ativa", VoiceInactive = "Última vez ativo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "Tem certeza de que deseja bloquear este usuário?", UnAddText = "Tem certeza de que deseja remover este amigo?", LessThanMin = "Agora mesmo", MinSecFormat = "Há %dm e %ds", HourMinFormat = "Há %dh e %dm", Followers = "Seguidores", Friends = "Amigos"},
-	es = {Title = "Jugadores", SearchPlaceholder = "Buscar jugador...", AddFriend = "Añadir", UnAddFriend = "Eliminar", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Cerrar", Settings = "Ajustes", Created = "Creación", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Activa", VoiceInactive = "Última vez activo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "¿Estás seguro de que quieres bloquear a este usuario?", UnAddText = "¿Estás seguro de que quieres eliminar a este amigo?", LessThanMin = "Ahora mismo", MinSecFormat = "Hace %dm y %ds", HourMinFormat = "Hace %dh y %dm", Followers = "Seguidores", Friends = "Amigos"}
+	en = {Title = "Players", SearchPlaceholder = "Search player...", AddFriend = "Add Friend", UnAddFriend = "UnAdd Friend", Block = "Block", ViewAvatar = "View Avatar", Close = "Close", Settings = "Settings", Created = "Created", Theme = "Theme", Lang = "Language", Confirm = "Confirm", VoiceActive = "Voice Active", VoiceInactive = "Last active: ", Disrespectful = "Flag User", RemoveDisrespectful = "Unflag User", BlockText = "Are you sure you want to block this user?", UnAddText = "Are you sure you want to remove this friend?", LessThanMin = "Just now", MinSecFormat = "%dm %ds ago", HourMinFormat = "%dh %dm ago", Followers = "Followers", Friends = "Friends", AgeChecked = "Age Checked", Country = "Country"},
+	pt = {Title = "Jogadores", SearchPlaceholder = "Pesquisar jogador...", AddFriend = "Adicionar", UnAddFriend = "Remover", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Fechar", Settings = "Configurações", Created = "Criação", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Ativa", VoiceInactive = "Última vez ativo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "Tem certeza de que deseja bloquear este usuário?", UnAddText = "Tem certeza de que deseja remover este amigo?", LessThanMin = "Agora mesmo", MinSecFormat = "Há %dm e %ds", HourMinFormat = "Há %dh e %dm", Followers = "Seguidores", Friends = "Amigos", AgeChecked = "Idade Verificada", Country = "País"},
+	es = {Title = "Jugadores", SearchPlaceholder = "Buscar jugador...", AddFriend = "Añadir", UnAddFriend = "Eliminar", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Cerrar", Settings = "Ajustes", Created = "Creación", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Activa", VoiceInactive = "Última vez activo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "¿Estás seguro de que quieres bloquear a este usuario?", UnAddText = "¿Estás seguro de que quieres eliminar a este amigo?", LessThanMin = "Ahora mismo", MinSecFormat = "Hace %dm y %ds", HourMinFormat = "Hace %dh y %dm", Followers = "Seguidores", Friends = "Amigos", AgeChecked = "Edad Verificada", Country = "País"}
 }
 
 local currentTheme = Themes[settingsData.Theme] or Themes.dark
@@ -489,9 +529,9 @@ local bgGradient = Instance.new("UIGradient")
 bgGradient.Name = "BackgroundFadeGradient"
 bgGradient.Rotation = 90
 bgGradient.Transparency = NumberSequence.new({
-	NumberSequenceKeypoint.new(0, 0),    -- Totalmente visível no topo
-	NumberSequenceKeypoint.new(0.6, 0.2), -- Transição suave
-	NumberSequenceKeypoint.new(1, 1)     -- Totalmente invisível/desaparece no limite inferior
+	NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(0.6, 0.2),
+	NumberSequenceKeypoint.new(1, 1)
 })
 bgGradient.Parent = backgroundBanner
 
@@ -670,6 +710,8 @@ end
 local friendsRow, friendsVal, friendsTitle = createHorizontalStatCol(1, currentLang.Friends)
 local followersRow, followersVal, followersTitle = createHorizontalStatCol(2, currentLang.Followers)
 local createdRow, createdVal, createdTitle = createHorizontalStatCol(3, currentLang.Created)
+local ageCheckedRow, ageCheckedVal, ageCheckedTitle = createHorizontalStatCol(4, currentLang.AgeChecked)
+local countryRow, countryVal, countryTitle = createHorizontalStatCol(5, currentLang.Country)
 
 local userDescriptionLabel = Instance.new("TextLabel")
 userDescriptionLabel.Name = "UserDescriptionLabel"
@@ -1103,6 +1145,14 @@ local function applyThemeAndLang()
 	createdTitle.TextColor3 = currentTheme.SUBTEXT
 	createdTitle.Text = currentLang.Created
 
+	ageCheckedVal.TextColor3 = currentTheme.TEXT
+	ageCheckedTitle.TextColor3 = currentTheme.SUBTEXT
+	ageCheckedTitle.Text = currentLang.AgeChecked
+
+	countryVal.TextColor3 = currentTheme.TEXT
+	countryTitle.TextColor3 = currentTheme.SUBTEXT
+	countryTitle.Text = currentLang.Country
+
 	avatarBtn.BackgroundColor3 = currentTheme.CARD
 	avatarBtn.TextColor3 = currentTheme.TEXT
 	if avatarBtn:FindFirstChild("BtnStroke") then avatarBtn.BtnStroke.Color = currentTheme.STROKE end
@@ -1394,12 +1444,10 @@ local function filterPlayersOnly()
 	end
 end
 
--- Apenas filtra visualmente enquanto o jogador digita
 searchInput:GetPropertyChangedSignal("Text"):Connect(function()
 	filterPlayersOnly()
 end)
 
--- AUTO-COMPLETA SOMENTE AO PRESSIONAR ENTER
 searchInput.FocusLost:Connect(function(enterPressed)
 	if enterPressed then
 		local queryLower = string.lower(searchInput.Text)
@@ -1591,7 +1639,6 @@ updatePlayerList = function(showLoading)
 			
 			local badgeOffset = 3
 
-			-- Badge do Roblox Plus ao lado do DisplayName na Leaderboard
 			checkRobloxPlus(plr, function(hasPlus)
 				if hasPlus then
 					local plusBadge = Instance.new("ImageLabel")
@@ -1670,7 +1717,6 @@ updatePlayerList = function(showLoading)
 					profileVerifiedIcon.Visible = false
 					profilePlusIcon.Visible = false
 
-					-- Checagem de emblemas e ícones de verificado / Roblox Plus na Modal de Perfil
 					checkRobloxPlus(plr, function(hasPlus)
 						local currentOffset = displayLabel.AbsoluteSize.X + 4
 						if hasPlus then
@@ -1690,6 +1736,17 @@ updatePlayerList = function(showLoading)
 					followersVal.Text = "..."
 					friendsVal.Text = "..."
 					userDescriptionLabel.Text = "..."
+
+					-- Atualização de AgeChecked e Country_Code na Modal
+					local ageStatus = getPlayerAgeChecked(plr)
+					if ageStatus == "Checked" then
+						ageCheckedVal.Text = "✓"
+					else
+						ageCheckedVal.Text = "✗"
+					end
+
+					local countryCode = getPlayerCountry(plr)
+					countryVal.Text = getCountryEmoji(countryCode)
 					
 					profileFullBody.Image = "rbxthumb://type=Avatar&id=" .. plr.UserId .. "&w=352&h=352"
 					userHeadshotImage.Image = "rbxthumb://type=AvatarHeadShot&id=" .. plr.UserId .. "&w=150&h=150"
