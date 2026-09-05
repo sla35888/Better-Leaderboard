@@ -86,11 +86,16 @@ local function checkRobloxPlus(plr, callback)
 
 	local hasPlus = false
 	pcall(function()
-		-- Checagem via atributo/propriedade personalizada do jogador ou assinatura padrão
 		if plr:GetAttribute("HasRobloxSubscription") ~= nil then
-			hasPlus = plr:GetAttribute("HasRobloxSubscription") == true
+			hasPlus = plr:GetAttribute("HasRobloxSubscription") == true or plr:GetAttribute("HasRobloxSubscription") == "ativo" or plr:GetAttribute("HasRobloxSubscription") == "Active" or plr:GetAttribute("HasRobloxSubscription") == true
 		elseif plr:FindFirstChild("HasRobloxSubscription") then
-			hasPlus = plr.HasRobloxSubscription.Value == true
+			local subObj = plr.HasRobloxSubscription
+			if subObj:IsA("BoolValue") then
+				hasPlus = subObj.Value == true
+			elseif subObj:IsA("StringValue") then
+				local val = string.lower(subObj.Value)
+				hasPlus = (val == "true" or val == "active" or val == "ativo" or val == "yes")
+			end
 		elseif plr.MembershipType == Enum.MembershipType.Premium then
 			hasPlus = true
 		end
@@ -117,9 +122,12 @@ local function getPlayerCountry(plr)
 	local code = nil
 	pcall(function()
 		if plr:GetAttribute("Country_Code") then
-			code = plr:GetAttribute("Country_Code")
+			code = tostring(plr:GetAttribute("Country_Code"))
 		elseif plr:FindFirstChild("Country_Code") then
-			code = plr.Country_Code.Value
+			local valObj = plr.Country_Code
+			if valObj:IsA("StringValue") then
+				code = valObj.Value
+			end
 		end
 	end)
 	return code
@@ -129,12 +137,23 @@ local function getPlayerAgeChecked(plr)
 	local isChecked = false
 	pcall(function()
 		if plr:GetAttribute("AgeChecked") ~= nil then
-			isChecked = (plr:GetAttribute("AgeChecked") == true or plr:GetAttribute("AgeChecked") == "Checked")
+			local attr = plr:GetAttribute("AgeChecked")
+			if attr == true or attr == "Checked" or attr == "checked" or attr == 1 then
+				isChecked = true
+			end
 		elseif plr:FindFirstChild("AgeChecked") then
-			isChecked = (plr.AgeChecked.Value == true or plr.AgeChecked.Value == "Checked")
+			local valObj = plr.AgeChecked
+			if valObj:IsA("BoolValue") then
+				isChecked = valObj.Value
+			elseif valObj:IsA("StringValue") then
+				local val = string.lower(valObj.Value)
+				if val == "checked" or val == "true" or val == "yes" then
+					isChecked = true
+				end
+			end
 		end
 	end)
-	return isChecked and "Checked" or "UnChecked"
+	return isChecked and "Checked" or "Unchecked"
 end
 
 --------------------------------------------------------------------------------
@@ -1737,7 +1756,6 @@ updatePlayerList = function(showLoading)
 					friendsVal.Text = "..."
 					userDescriptionLabel.Text = "..."
 
-					-- Atualização de AgeChecked e Country_Code na Modal
 					local ageStatus = getPlayerAgeChecked(plr)
 					ageCheckedVal.Text = ageStatus
 
