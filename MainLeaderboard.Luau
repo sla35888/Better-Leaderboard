@@ -86,24 +86,33 @@ local function checkRobloxPlus(plr, callback)
 
 	local hasPlus = false
 	pcall(function()
-		local attrSub = plr:GetAttribute("HasRobloxSubscription")
-		if attrSub ~= nil then
-			if type(attrSub) == "boolean" then
-				hasPlus = attrSub
-			elseif type(attrSub) == "string" then
-				local val = string.lower(attrSub)
-				hasPlus = (val == "active" or val == "ativo" or val == "true")
+		-- Checagem direta da propriedade booleana do objeto Player
+		local subProp = plr.HasRobloxSubscription
+		if type(subProp) == "boolean" then
+			hasPlus = subProp
+		elseif type(subProp) == "userdata" and typeof(subProp) == "EnumItem" then
+			hasPlus = (subProp.Name == "Active" or subProp.Name == "True")
+		else
+			-- Fallback para Atributo ou BoolValue/StringValue filho
+			local attrSub = plr:GetAttribute("HasRobloxSubscription")
+			if attrSub ~= nil then
+				if type(attrSub) == "boolean" then
+					hasPlus = attrSub
+				elseif type(attrSub) == "string" then
+					local val = string.lower(attrSub)
+					hasPlus = (val == "active" or val == "ativo" or val == "true")
+				end
+			elseif plr:FindFirstChild("HasRobloxSubscription") then
+				local subObj = plr.HasRobloxSubscription
+				if subObj:IsA("BoolValue") then
+					hasPlus = subObj.Value == true
+				elseif subObj:IsA("StringValue") then
+					local val = string.lower(subObj.Value)
+					hasPlus = (val == "true" or val == "active" or val == "ativo" or val == "yes")
+				end
+			elseif plr.MembershipType == Enum.MembershipType.Premium then
+				hasPlus = true
 			end
-		elseif plr:FindFirstChild("HasRobloxSubscription") then
-			local subObj = plr.HasRobloxSubscription
-			if subObj:IsA("BoolValue") then
-				hasPlus = subObj.Value == true
-			elseif subObj:IsA("StringValue") then
-				local val = string.lower(subObj.Value)
-				hasPlus = (val == "true" or val == "active" or val == "ativo" or val == "yes")
-			end
-		elseif plr.MembershipType == Enum.MembershipType.Premium then
-			hasPlus = true
 		end
 	end)
 
@@ -142,25 +151,39 @@ end
 local function getPlayerAgeChecked(plr)
 	local isChecked = false
 	pcall(function()
-		local ageAttr = plr:GetAttribute("AgeChecked")
-		if ageAttr ~= nil then
-			if type(ageAttr) == "string" then
-				isChecked = (ageAttr == "Checked")
-			elseif type(ageAttr) == "boolean" then
-				isChecked = ageAttr
+		-- 1. Checagem da propriedade nativa no Player (Enum / String / Bool)
+		local rawVal = plr.AgeChecked
+		if rawVal ~= nil then
+			if typeof(rawVal) == "EnumItem" then
+				isChecked = (rawVal.Name == "Checked")
+			elseif type(rawVal) == "string" then
+				isChecked = (string.lower(rawVal) == "checked")
+			elseif type(rawVal) == "boolean" then
+				isChecked = rawVal
 			end
-		elseif plr:FindFirstChild("AgeChecked") then
+		end
+
+		-- 2. Fallback caso venha via Atributos
+		if not isChecked then
+			local ageAttr = plr:GetAttribute("AgeChecked")
+			if ageAttr ~= nil then
+				if typeof(ageAttr) == "EnumItem" then
+					isChecked = (ageAttr.Name == "Checked")
+				elseif type(ageAttr) == "string" then
+					isChecked = (string.lower(ageAttr) == "checked")
+				elseif type(ageAttr) == "boolean" then
+					isChecked = ageAttr
+				end
+			end
+		end
+
+		-- 3. Fallback caso venha como Objeto filho (StringValue / BoolValue)
+		if not isChecked and plr:FindFirstChild("AgeChecked") then
 			local valObj = plr.AgeChecked
 			if valObj:IsA("StringValue") then
-				isChecked = (valObj.Value == "Checked")
+				isChecked = (string.lower(valObj.Value) == "checked")
 			elseif valObj:IsA("BoolValue") then
 				isChecked = valObj.Value
-			end
-		elseif plr.AgeChecked ~= nil then
-			if type(plr.AgeChecked) == "string" then
-				isChecked = (plr.AgeChecked == "Checked")
-			elseif type(plr.AgeChecked) == "boolean" then
-				isChecked = plr.AgeChecked
 			end
 		end
 	end)
