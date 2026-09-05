@@ -8,78 +8,135 @@ local StarterGui = game:GetService("StarterGui")
 local VoiceChatService = game:GetService("VoiceChatService")
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
 
 local localPlayer = Players.LocalPlayer
-
--- Função para requisições HTTP do lado do cliente (APIs de terceiros / Executores)
 local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request
 
-local function fetchUserDescriptionThirdParty(userId)
-	if not httpRequest then
-		return "HTTP Request não suportado"
-	end
+--------------------------------------------------------------------------------
+-- AUTO EXECUTE AO ENTRAR / TELEPORTAR
+--------------------------------------------------------------------------------
+local AUTO_EXECUTE_URL = "https://raw.githubusercontent.com/sla35888/Better-Leaderboard/refs/heads/main/MainLeaderboard.Luau"
 
-	local url = string.format("https://users.roproxy.com/v1/users/%d", userId)
-	local success, response = pcall(function()
-		return httpRequest({
-			Url = url,
-			Method = "GET"
-		})
-	end)
-
-	if success and response and response.Body then
-		local decodeSuccess, data = pcall(function()
-			return HttpService:JSONDecode(response.Body)
-		end)
-
-		if decodeSuccess and data and data.description then
-			if data.description == "" then
-				return "Sem descrição."
-			end
-			return data.description
+local function autoExecuteScript()
+	pcall(function()
+		if queue_on_teleport then
+			queue_on_teleport(string.format('loadstring(game:HttpGet("%s"))()', AUTO_EXECUTE_URL))
+		elseif syn and syn.queue_on_teleport then
+			syn.queue_on_teleport(string.format('loadstring(game:HttpGet("%s"))()', AUTO_EXECUTE_URL))
 		end
-	end
-
-	return "Erro ao carregar descrição."
+	end)
 end
 
-local function fetchFriendsAndFollowers(userId)
-	local followersCount = 0
-	local friendsCount = 0
+autoExecuteScript()
 
-	if httpRequest then
-		-- Seguidores
-		pcall(function()
-			local res = httpRequest({
-				Url = string.format("https://friends.roproxy.com/v1/users/%d/followers/count", userId),
-				Method = "GET"
-			})
-			if res and res.Body then
-				local data = HttpService:JSONDecode(res.Body)
-				if data and data.count then
-					followersCount = data.count
-				end
-			end
-		end)
+TeleportService.TeleportInitFailed:Connect(autoExecuteScript)
+localPlayer.OnTeleport:Connect(function()
+	autoExecuteScript()
+end)
 
-		-- Amigos
-		pcall(function()
-			local res = httpRequest({
-				Url = string.format("https://friends.roproxy.com/v1/users/%d/friends/count", userId),
-				Method = "GET"
-			})
-			if res and res.Body then
-				local data = HttpService:JSONDecode(res.Body)
-				if data and data.count then
-					friendsCount = data.count
-				end
-			end
+--------------------------------------------------------------------------------
+-- SISTEMA DE FILA DE REQUISIÇÕES (HTTP QUEUE)
+--------------------------------------------------------------------------------
+local HttpQueue = {
+	queue = {},
+	isProcessing = false,
+	delayBetweenRequests = 0.25
+}
+
+function HttpQueue:Add(taskFunc)
+	table.insert(self.queue, taskFunc)
+	if not self.isProcessing then
+		task.spawn(function()
+			self:Process()
 		end)
 	end
-
-	return followersCount, friendsCount
 end
 
+function HttpQueue:Process()
+	self.isProcessing = true
+	while #self.queue > 0 do
+		local currentTask = table.remove(self.queue, 1)
+		pcall(currentTask)
+		task.wait(self.delayBetweenRequests)
+	end
+	self.isProcessing = false
+end
+
+function HttpQueue:Clear()
+	table.clear(self.queue)
+end
+
+--------------------------------------------------------------------------------
+-- APIS COM HTTP REQUEST
+--------------------------------------------------------------------------------
+local function fetchUserDescriptionThirdParty(userId, callback)
+	HttpQueue:Add(function()
+		if not httpRequest then
+			callback("HTTP Request not supported")
+			return
+		end
+
+		local url = string.format("https://users.roproxy.com/v1/users/%d", userId)
+		local success, response = pcall(function()
+			return httpRequest({ Url = url, Method = "GET" })
+		end)
+
+		if success and response and response.Body then
+			local decodeSuccess, data = pcall(function()
+				return HttpService:JSONDecode(response.Body)
+			end)
+
+			if decodeSuccess and data and data.description then
+				if data.description == "" then
+					callback("No description.")
+				else
+					callback(data.description)
+				end
+				return
+			end
+		end
+
+		callback("Error loading description.")
+	end)
+end
+
+local function fetchFriendsAndFollowers(userId, callback)
+	HttpQueue:Add(function()
+		local followersCount = 0
+		local friendsCount = 0
+
+		if httpRequest then
+			pcall(function()
+				local res = httpRequest({
+					Url = string.format("https://friends.roproxy.com/v1/users/%d/followers/count", userId),
+					Method = "GET"
+				})
+				if res and res.Body then
+					local data = HttpService:JSONDecode(res.Body)
+					if data and data.count then followersCount = data.count end
+				end
+			end)
+
+			pcall(function()
+				local res = httpRequest({
+					Url = string.format("https://friends.roproxy.com/v1/users/%d/friends/count", userId),
+					Method = "GET"
+				})
+				if res and res.Body then
+					local data = HttpService:JSONDecode(res.Body)
+					if data and data.count then friendsCount = data.count end
+				end
+			end)
+		end
+
+		callback(followersCount, friendsCount)
+	end)
+end
+
+--------------------------------------------------------------------------------
+-- SETUP INICIAL DA GUI
+--------------------------------------------------------------------------------
 task.spawn(function()
 	repeat
 		local success = pcall(function()
@@ -118,18 +175,18 @@ local function saveSettings()
 end
 
 local Themes = {
-	dark = {BG = Color3.fromRGB(18, 19, 21), CARD = Color3.fromRGB(28, 29, 32), STROKE = Color3.fromRGB(45, 47, 52), TEXT = Color3.fromRGB(255, 255, 255), SUBTEXT = Color3.fromRGB(160, 163, 170), SPINNER = Color3.fromRGB(0, 112, 255)},
-	dark_red = {BG = Color3.fromRGB(25, 12, 14), CARD = Color3.fromRGB(38, 18, 20), STROKE = Color3.fromRGB(60, 25, 30), TEXT = Color3.fromRGB(255, 255, 255), SUBTEXT = Color3.fromRGB(180, 140, 145), SPINNER = Color3.fromRGB(245, 52, 60)},
-	dark_blue = {BG = Color3.fromRGB(12, 18, 28), CARD = Color3.fromRGB(18, 26, 40), STROKE = Color3.fromRGB(30, 45, 68), TEXT = Color3.fromRGB(255, 255, 255), SUBTEXT = Color3.fromRGB(140, 160, 185), SPINNER = Color3.fromRGB(0, 140, 255)},
-	dark_green = {BG = Color3.fromRGB(12, 24, 16), CARD = Color3.fromRGB(18, 35, 24), STROKE = Color3.fromRGB(30, 58, 38), TEXT = Color3.fromRGB(255, 255, 255), SUBTEXT = Color3.fromRGB(140, 180, 155), SPINNER = Color3.fromRGB(40, 200, 100)},
-	dark_purple = {BG = Color3.fromRGB(20, 12, 28), CARD = Color3.fromRGB(30, 18, 42), STROKE = Color3.fromRGB(50, 30, 70), TEXT = Color3.fromRGB(255, 255, 255), SUBTEXT = Color3.fromRGB(165, 140, 185), SPINNER = Color3.fromRGB(160, 60, 240)},
-	light = {BG = Color3.fromRGB(240, 240, 242), CARD = Color3.fromRGB(255, 255, 255), STROKE = Color3.fromRGB(210, 212, 218), TEXT = Color3.fromRGB(20, 20, 20), SUBTEXT = Color3.fromRGB(100, 102, 110), SPINNER = Color3.fromRGB(0, 112, 255)}
+	dark = {BG = Color3.fromRGB(15, 16, 18), CARD = Color3.fromRGB(24, 25, 28), STROKE = Color3.fromRGB(35, 37, 42), LIGHT_ACCENT = Color3.fromRGB(45, 48, 55), TEXT = Color3.fromRGB(240, 240, 242), SUBTEXT = Color3.fromRGB(140, 143, 150), SPINNER = Color3.fromRGB(255, 255, 255)},
+	dark_red = {BG = Color3.fromRGB(20, 10, 12), CARD = Color3.fromRGB(30, 15, 17), STROKE = Color3.fromRGB(45, 20, 23), LIGHT_ACCENT = Color3.fromRGB(70, 30, 35), TEXT = Color3.fromRGB(245, 240, 240), SUBTEXT = Color3.fromRGB(160, 125, 130), SPINNER = Color3.fromRGB(230, 60, 70)},
+	dark_blue = {BG = Color3.fromRGB(10, 14, 22), CARD = Color3.fromRGB(15, 21, 32), STROKE = Color3.fromRGB(25, 36, 54), LIGHT_ACCENT = Color3.fromRGB(40, 60, 90), TEXT = Color3.fromRGB(240, 245, 250), SUBTEXT = Color3.fromRGB(130, 145, 165), SPINNER = Color3.fromRGB(0, 120, 230)},
+	dark_green = {BG = Color3.fromRGB(10, 18, 12), CARD = Color3.fromRGB(15, 26, 18), STROKE = Color3.fromRGB(25, 42, 30), LIGHT_ACCENT = Color3.fromRGB(40, 75, 50), TEXT = Color3.fromRGB(240, 250, 242), SUBTEXT = Color3.fromRGB(130, 160, 140), SPINNER = Color3.fromRGB(40, 180, 90)},
+	dark_purple = {BG = Color3.fromRGB(16, 10, 22), CARD = Color3.fromRGB(24, 15, 32), STROKE = Color3.fromRGB(40, 25, 54), LIGHT_ACCENT = Color3.fromRGB(65, 40, 90), TEXT = Color3.fromRGB(245, 240, 250), SUBTEXT = Color3.fromRGB(150, 130, 165), SPINNER = Color3.fromRGB(140, 60, 220)},
+	light = {BG = Color3.fromRGB(245, 245, 247), CARD = Color3.fromRGB(255, 255, 255), STROKE = Color3.fromRGB(220, 222, 228), LIGHT_ACCENT = Color3.fromRGB(235, 237, 242), TEXT = Color3.fromRGB(25, 25, 28), SUBTEXT = Color3.fromRGB(110, 112, 120), SPINNER = Color3.fromRGB(30, 30, 30)}
 }
 
 local Translations = {
-	en = {Title = "Players", AddFriend = "Add Friend", UnAddFriend = "UnAdd Friend", Block = "Block", ViewAvatar = "View avatar", Close = "Close", Settings = "Settings", Created = "Created: ", Theme = "Theme", Lang = "Language", Confirm = "Confirm", VoiceActive = "🔊 Voice Active", VoiceInactive = "Last active: ", Disrespectful = "Disrespectful User", RemoveDisrespectful = "Remove disrespectful behavior", BlockText = "Are you sure you want to block this user?", UnAddText = "Are you sure you want to UnAdd this person?", LessThanMin = "Less than a minute", MinSecFormat = "%d minute and %d seconds ago", HourMinFormat = "%d hours and %d minutes ago", Followers = "Followers: ", Friends = "Friends: "},
-	pt = {Title = "Jogadores", AddFriend = "Adicionar Amigo", UnAddFriend = "Remover Amigo", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Fechar", Settings = "Configurações", Created = "Criado em: ", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "🔊 Voz Ativa", VoiceInactive = "Última vez ativo: ", Disrespectful = "Usuário Desrespeitoso", RemoveDisrespectful = "Remover comportamento desrespeitoso", BlockText = "Tem certeza de que deseja bloquear este usuário?", UnAddText = "Tem certeza de que deseja remover este amigo?", LessThanMin = "Menos de um Minuto", MinSecFormat = "Há %d minuto e %d segundos", HourMinFormat = "Há %d horas e %d minutos", Followers = "Seguidores: ", Friends = "Amigos: "},
-	es = {Title = "Jugadores", AddFriend = "Añadir Amigo", UnAddFriend = "Eliminar Amigo", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Cerrar", Settings = "Ajustes", Created = "Creado: ", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "🔊 Voice Activa", VoiceInactive = "Última vez activo: ", Disrespectful = "Usuario Desrespetuoso", RemoveDisrespectful = "Eliminar comportamiento desrespetuoso", BlockText = "¿Estás seguro de que quieres bloquear a este usuario?", UnAddText = "¿Estás seguro de que quieres eliminar a este amigo?", LessThanMin = "Menos de un Minuto", MinSecFormat = "Hace %d minuto y %d segundos", HourMinFormat = "Hace %d horas y %d minutos", Followers = "Seguidores: ", Friends = "Amigos: "}
+	en = {Title = "Players", SearchPlaceholder = "Search player...", AddFriend = "Add Friend", UnAddFriend = "UnAdd Friend", Block = "Block", ViewAvatar = "View Avatar", Close = "Close", Settings = "Settings", Created = "Created", Theme = "Theme", Lang = "Language", Confirm = "Confirm", VoiceActive = "Voice Active", VoiceInactive = "Last active: ", Disrespectful = "Flag User", RemoveDisrespectful = "Unflag User", BlockText = "Are you sure you want to block this user?", UnAddText = "Are you sure you want to remove this friend?", LessThanMin = "Just now", MinSecFormat = "%dm %ds ago", HourMinFormat = "%dh %dm ago", Followers = "Followers", Friends = "Friends"},
+	pt = {Title = "Jogadores", SearchPlaceholder = "Pesquisar jogador...", AddFriend = "Adicionar", UnAddFriend = "Remover", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Fechar", Settings = "Configurações", Created = "Criação", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Ativa", VoiceInactive = "Última vez ativo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "Tem certeza de que deseja bloquear este usuário?", UnAddText = "Tem certeza de que deseja remover este amigo?", LessThanMin = "Agora mesmo", MinSecFormat = "Há %dm e %ds", HourMinFormat = "Há %dh e %dm", Followers = "Seguidores", Friends = "Amigos"},
+	es = {Title = "Jugadores", SearchPlaceholder = "Buscar jugador...", AddFriend = "Añadir", UnAddFriend = "Eliminar", Block = "Bloquear", ViewAvatar = "Ver Avatar", Close = "Cerrar", Settings = "Ajustes", Created = "Creación", Theme = "Tema", Lang = "Idioma", Confirm = "Confirmar", VoiceActive = "Voz Activa", VoiceInactive = "Última vez activo: ", Disrespectful = "Marcar", RemoveDisrespectful = "Desmarcar", BlockText = "¿Estás seguro de que quieres bloquear a este usuario?", UnAddText = "¿Estás seguro de que quieres eliminar a este amigo?", LessThanMin = "Ahora mismo", MinSecFormat = "Hace %dm y %ds", HourMinFormat = "Hace %dh y %dm", Followers = "Seguidores", Friends = "Amigos"}
 }
 
 local currentTheme = Themes[settingsData.Theme] or Themes.dark
@@ -143,17 +200,17 @@ screenGui.Parent = CoreGui
 
 local toggleBtn = Instance.new("TextButton")
 toggleBtn.Name = "ToggleArrowBtn"
-toggleBtn.Size = isMobile and UDim2.new(0, 40, 0, 40) or UDim2.new(0, 36, 0, 36)
-toggleBtn.Position = UDim2.new(1, -48, 0, 10)
+toggleBtn.Size = isMobile and UDim2.new(0, 32, 0, 32) or UDim2.new(0, 28, 0, 28)
+toggleBtn.Position = UDim2.new(1, -38, 0, 12)
 toggleBtn.BackgroundColor3 = currentTheme.BG
-toggleBtn.Text = "➔"
+toggleBtn.Text = "<"
 toggleBtn.TextColor3 = currentTheme.TEXT
-toggleBtn.TextSize = isMobile and 16 or 14
+toggleBtn.TextSize = isMobile and 14 or 12
 toggleBtn.Font = Enum.Font.BuilderSansBold
 toggleBtn.Parent = screenGui
 
 local toggleCorner = Instance.new("UICorner")
-toggleCorner.CornerRadius = UDim.new(0, 8)
+toggleCorner.CornerRadius = UDim.new(0, 6)
 toggleCorner.Parent = toggleBtn
 
 local toggleStroke = Instance.new("UIStroke")
@@ -163,15 +220,15 @@ toggleStroke.Parent = toggleBtn
 
 local leaderboardFrame = Instance.new("CanvasGroup")
 leaderboardFrame.Name = "LeaderboardContainer"
-leaderboardFrame.Size = isMobile and UDim2.new(0, 320, 0, 320) or UDim2.new(0, 420, 0, 350)
-leaderboardFrame.Position = UDim2.new(1, 10, 0, 52)
+leaderboardFrame.Size = isMobile and UDim2.new(0, 300, 0, 330) or UDim2.new(0, 380, 0, 360)
+leaderboardFrame.Position = UDim2.new(1, 10, 0, 48)
 leaderboardFrame.BackgroundColor3 = currentTheme.BG
 leaderboardFrame.GroupTransparency = 1
 leaderboardFrame.Visible = false
 leaderboardFrame.Parent = screenGui
 
 local lbCorner = Instance.new("UICorner")
-lbCorner.CornerRadius = UDim.new(0, 10)
+lbCorner.CornerRadius = UDim.new(0, 8)
 lbCorner.Parent = leaderboardFrame
 
 local lbStroke = Instance.new("UIStroke")
@@ -180,27 +237,62 @@ lbStroke.Thickness = 1
 lbStroke.Parent = leaderboardFrame
 
 local lbTitle = Instance.new("TextLabel")
-lbTitle.Size = UDim2.new(1, -50, 0, 32)
+lbTitle.Size = UDim2.new(1, -40, 0, 26)
 lbTitle.Position = UDim2.new(0, 10, 0, 2)
 lbTitle.BackgroundTransparency = 1
 lbTitle.Text = currentLang.Title
 lbTitle.TextColor3 = currentTheme.TEXT
-lbTitle.TextSize = isMobile and 13 or 12
+lbTitle.TextSize = isMobile and 12 or 11
 lbTitle.Font = Enum.Font.BuilderSansBold
 lbTitle.TextXAlignment = Enum.TextXAlignment.Left
 lbTitle.Parent = leaderboardFrame
 
 local settingsIconBtn = Instance.new("TextButton")
-settingsIconBtn.Size = UDim2.new(0, 28, 0, 28)
-settingsIconBtn.Position = UDim2.new(1, -34, 0, 4)
+settingsIconBtn.Size = UDim2.new(0, 24, 0, 24)
+settingsIconBtn.Position = UDim2.new(1, -28, 0, 3)
 settingsIconBtn.BackgroundTransparency = 1
-settingsIconBtn.Text = "⚙️"
-settingsIconBtn.TextSize = 14
+settingsIconBtn.Text = "⚙"
+settingsIconBtn.TextColor3 = currentTheme.SUBTEXT
+settingsIconBtn.TextSize = 13
 settingsIconBtn.Parent = leaderboardFrame
 
+--------------------------------------------------------------------------------
+-- TEXTBOX DE PESQUISA NA LEADERBOARD
+--------------------------------------------------------------------------------
+local searchFrame = Instance.new("Frame")
+searchFrame.Name = "SearchFrame"
+searchFrame.Size = UDim2.new(1, -20, 0, 24)
+searchFrame.Position = UDim2.new(0, 10, 0, 28)
+searchFrame.BackgroundColor3 = currentTheme.CARD
+searchFrame.Parent = leaderboardFrame
+
+local searchCorner = Instance.new("UICorner")
+searchCorner.CornerRadius = UDim.new(0, 5)
+searchCorner.Parent = searchFrame
+
+local searchStroke = Instance.new("UIStroke")
+searchStroke.Color = currentTheme.STROKE
+searchStroke.Thickness = 1
+searchStroke.Parent = searchFrame
+
+local searchInput = Instance.new("TextBox")
+searchInput.Name = "SearchInput"
+searchInput.Size = UDim2.new(1, -12, 1, 0)
+searchInput.Position = UDim2.new(0, 6, 0, 0)
+searchInput.BackgroundTransparency = 1
+searchInput.Text = ""
+searchInput.PlaceholderText = currentLang.SearchPlaceholder
+searchInput.PlaceholderColor3 = currentTheme.SUBTEXT
+searchInput.TextColor3 = currentTheme.TEXT
+searchInput.TextSize = isMobile and 10 or 9
+searchInput.Font = Enum.Font.BuilderSans
+searchInput.TextXAlignment = Enum.TextXAlignment.Left
+searchInput.ClearTextOnFocus = false
+searchInput.Parent = searchFrame
+
 local scrollingPlayers = Instance.new("ScrollingFrame")
-scrollingPlayers.Size = UDim2.new(1, -12, 1, -40)
-scrollingPlayers.Position = UDim2.new(0, 6, 0, 34)
+scrollingPlayers.Size = UDim2.new(1, -12, 1, -62)
+scrollingPlayers.Position = UDim2.new(0, 6, 0, 56)
 scrollingPlayers.BackgroundTransparency = 1
 scrollingPlayers.BorderSizePixel = 0
 scrollingPlayers.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -211,7 +303,7 @@ scrollingPlayers.Parent = leaderboardFrame
 
 local listLayout = Instance.new("UIListLayout")
 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 5)
+listLayout.Padding = UDim.new(0, 4)
 listLayout.Parent = scrollingPlayers
 
 local loadingContainer = Instance.new("Frame")
@@ -222,10 +314,10 @@ loadingContainer.Visible = false
 loadingContainer.Parent = leaderboardFrame
 
 local spinnerOuter = Instance.new("Frame")
-spinnerOuter.Size = UDim2.new(0, 36, 0, 36)
-spinnerOuter.Position = UDim2.new(0.5, -18, 0.5, -18)
+spinnerOuter.Size = UDim2.new(0, 28, 0, 28)
+spinnerOuter.Position = UDim2.new(0.5, -14, 0.5, -14)
 spinnerOuter.BackgroundColor3 = currentTheme.SPINNER
-spinnerOuter.BackgroundTransparency = 0.2
+spinnerOuter.BackgroundTransparency = 0.3
 spinnerOuter.Parent = loadingContainer
 
 local spinnerCorner = Instance.new("UICorner")
@@ -233,8 +325,8 @@ spinnerCorner.CornerRadius = UDim.new(1, 0)
 spinnerCorner.Parent = spinnerOuter
 
 local spinnerInner = Instance.new("Frame")
-spinnerInner.Size = UDim2.new(0, 26, 0, 26)
-spinnerInner.Position = UDim2.new(0.5, -13, 0.5, -13)
+spinnerInner.Size = UDim2.new(0, 20, 0, 20)
+spinnerInner.Position = UDim2.new(0.5, -10, 0.5, -10)
 spinnerInner.BackgroundColor3 = currentTheme.BG
 spinnerInner.Parent = spinnerOuter
 
@@ -243,8 +335,8 @@ spinnerInnerCorner.CornerRadius = UDim.new(1, 0)
 spinnerInnerCorner.Parent = spinnerInner
 
 local spinnerNotch = Instance.new("Frame")
-spinnerNotch.Size = UDim2.new(0, 10, 0, 10)
-spinnerNotch.Position = UDim2.new(0.5, -5, 0, -2)
+spinnerNotch.Size = UDim2.new(0, 8, 0, 8)
+spinnerNotch.Position = UDim2.new(0.5, -4, 0, -2)
 spinnerNotch.BackgroundColor3 = currentTheme.BG
 spinnerNotch.BorderSizePixel = 0
 spinnerNotch.Parent = spinnerOuter
@@ -256,7 +348,7 @@ local function showLoadingCircle()
 	scrollingPlayers.Visible = false
 	if spinnerTween then spinnerTween:Cancel() end
 	spinnerOuter.Rotation = 0
-	spinnerTween = TweenService:Create(spinnerOuter, TweenInfo.new(0.9, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {
+	spinnerTween = TweenService:Create(spinnerOuter, TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {
 		Rotation = 360
 	})
 	spinnerTween:Play()
@@ -273,10 +365,10 @@ end
 
 local function createSpinner(parentFrame)
 	local outer = Instance.new("Frame")
-	outer.Size = UDim2.new(0, 32, 0, 32)
-	outer.Position = UDim2.new(0.5, -16, 0.5, -16)
+	outer.Size = UDim2.new(0, 22, 0, 22)
+	outer.Position = UDim2.new(0.5, -11, 0.5, -11)
 	outer.BackgroundColor3 = currentTheme.SPINNER
-	outer.BackgroundTransparency = 0.2
+	outer.BackgroundTransparency = 0.3
 	outer.ZIndex = 10
 	outer.Parent = parentFrame
 
@@ -285,8 +377,8 @@ local function createSpinner(parentFrame)
 	c1.Parent = outer
 
 	local inner = Instance.new("Frame")
-	inner.Size = UDim2.new(0, 22, 0, 22)
-	inner.Position = UDim2.new(0.5, -11, 0.5, -11)
+	inner.Size = UDim2.new(0, 14, 0, 14)
+	inner.Position = UDim2.new(0.5, -7, 0.5, -7)
 	inner.BackgroundColor3 = currentTheme.CARD
 	inner.ZIndex = 11
 	inner.Parent = outer
@@ -296,32 +388,32 @@ local function createSpinner(parentFrame)
 	c2.Parent = inner
 
 	local notch = Instance.new("Frame")
-	notch.Size = UDim2.new(0, 8, 0, 8)
-	notch.Position = UDim2.new(0.5, -4, 0, -2)
+	notch.Size = UDim2.new(0, 5, 0, 5)
+	notch.Position = UDim2.new(0.5, -2.5, 0, -2)
 	notch.BackgroundColor3 = currentTheme.CARD
 	notch.BorderSizePixel = 0
 	notch.ZIndex = 12
 	notch.Parent = outer
 
-	local tween = TweenService:Create(outer, TweenInfo.new(0.9, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {
+	local tween = TweenService:Create(outer, TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), {
 		Rotation = 360
 	})
 	
 	return outer, tween
 end
 
--- Janela Profile
 local profileModal = Instance.new("CanvasGroup")
 profileModal.Name = "ProfileModal"
-profileModal.Size = isMobile and UDim2.new(0, 280, 0, 380) or UDim2.new(0, 300, 0, 405)
-profileModal.Position = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
+profileModal.Size = isMobile and UDim2.new(0.9, 0, 0.8, 0) or UDim2.new(0, 310, 0, 460)
+profileModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+profileModal.AnchorPoint = Vector2.new(0.5, 0.5)
 profileModal.BackgroundColor3 = currentTheme.BG
 profileModal.GroupTransparency = 1
 profileModal.Visible = false
 profileModal.Parent = screenGui
 
 local pmCorner = Instance.new("UICorner")
-pmCorner.CornerRadius = UDim.new(0, 12)
+pmCorner.CornerRadius = UDim.new(0, 10)
 pmCorner.Parent = profileModal
 
 local pmStroke = Instance.new("UIStroke")
@@ -329,33 +421,53 @@ pmStroke.Color = currentTheme.STROKE
 pmStroke.Thickness = 1
 pmStroke.Parent = profileModal
 
+local profileModalScroll = Instance.new("ScrollingFrame")
+profileModalScroll.Name = "ProfileModalScroll"
+profileModalScroll.Size = UDim2.new(1, 0, 1, -40)
+profileModalScroll.Position = UDim2.new(0, 0, 0, 0)
+profileModalScroll.BackgroundTransparency = 1
+profileModalScroll.BorderSizePixel = 0
+profileModalScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+profileModalScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+profileModalScroll.ScrollBarThickness = 2
+profileModalScroll.ScrollBarImageColor3 = currentTheme.STROKE
+profileModalScroll.Parent = profileModal
+
 local profileContentGroup = Instance.new("CanvasGroup")
 profileContentGroup.Name = "ProfileContentGroup"
-profileContentGroup.Size = UDim2.new(1, 0, 1, 0)
+profileContentGroup.Size = UDim2.new(1, 0, 0, isMobile and 350 or 400)
 profileContentGroup.BackgroundTransparency = 1
-profileContentGroup.GroupTransparency = 0
-profileContentGroup.Parent = profileModal
+profileContentGroup.Parent = profileModalScroll
 
+local backgroundBanner = Instance.new("Frame")
+backgroundBanner.Name = "BackgroundBanner"
+backgroundBanner.Size = UDim2.new(1, 0, 0, isMobile and 100 or 120)
+backgroundBanner.Position = UDim2.new(0, 0, 0, 0)
+backgroundBanner.BackgroundColor3 = currentTheme.CARD
+backgroundBanner.BorderSizePixel = 0
+backgroundBanner.Parent = profileContentGroup
+
+local bgCorner = Instance.new("UICorner")
+bgCorner.Name = "BackgroundCorner"
+bgCorner.CornerRadius = UDim.new(0, 8)
+bgCorner.Parent = backgroundBanner
+
+--------------------------------------------------------------------------------
+-- DEMAIS ELEMENTOS DO PERFIL
+--------------------------------------------------------------------------------
 local avatarContainer = Instance.new("Frame")
 avatarContainer.Name = "AvatarContainer"
-avatarContainer.Size = isMobile and UDim2.new(0, 85, 0, 85) or UDim2.new(0, 95, 0, 95)
-avatarContainer.Position = UDim2.new(0, 12, 0, 12)
-avatarContainer.BackgroundColor3 = currentTheme.CARD
+avatarContainer.Size = isMobile and UDim2.new(0, 90, 0, 90) or UDim2.new(0, 105, 0, 105)
+avatarContainer.Position = UDim2.new(0.5, isMobile and -45 or -52, 0, 10)
+avatarContainer.BackgroundTransparency = 1
+avatarContainer.ZIndex = 2
 avatarContainer.Parent = profileContentGroup
-
-local pfbCorner = Instance.new("UICorner")
-pfbCorner.CornerRadius = UDim.new(0, 8)
-pfbCorner.Parent = avatarContainer
 
 local profileFullBody = Instance.new("ImageLabel")
 profileFullBody.Name = "Avatar2D"
 profileFullBody.Size = UDim2.new(1, 0, 1, 0)
 profileFullBody.BackgroundTransparency = 1
 profileFullBody.Parent = avatarContainer
-
-local pfbCorner2 = Instance.new("UICorner")
-pfbCorner2.CornerRadius = UDim.new(0, 8)
-pfbCorner2.Parent = profileFullBody
 
 local viewport3D = Instance.new("ViewportFrame")
 viewport3D.Name = "Avatar3D"
@@ -364,9 +476,34 @@ viewport3D.BackgroundTransparency = 1
 viewport3D.Visible = false
 viewport3D.Parent = avatarContainer
 
-local vpCorner = Instance.new("UICorner")
-vpCorner.CornerRadius = UDim.new(0, 8)
-vpCorner.Parent = viewport3D
+local headshotContainer = Instance.new("Frame")
+headshotContainer.Name = "HeadshotContainer"
+headshotContainer.Size = UDim2.new(0, 44, 0, 44)
+headshotContainer.Position = UDim2.new(0, 12, 0, isMobile and 95 or 115)
+headshotContainer.BackgroundColor3 = currentTheme.BG
+headshotContainer.ZIndex = 5
+headshotContainer.Parent = profileContentGroup
+
+local hsCorner = Instance.new("UICorner")
+hsCorner.CornerRadius = UDim.new(1, 0)
+hsCorner.Parent = headshotContainer
+
+local hsStroke = Instance.new("UIStroke")
+hsStroke.Name = "HeadshotStroke"
+hsStroke.Color = currentTheme.STROKE
+hsStroke.Thickness = 1
+hsStroke.Parent = headshotContainer
+
+local userHeadshotImage = Instance.new("ImageLabel")
+userHeadshotImage.Name = "UserHeadshotImage"
+userHeadshotImage.Size = UDim2.new(1, 0, 1, 0)
+userHeadshotImage.BackgroundTransparency = 1
+userHeadshotImage.ZIndex = 6
+userHeadshotImage.Parent = headshotContainer
+
+local hsImgCorner = Instance.new("UICorner")
+hsImgCorner.CornerRadius = UDim.new(1, 0)
+hsImgCorner.Parent = userHeadshotImage
 
 local avatarSpinnerOuter, avatarSpinnerTween = createSpinner(avatarContainer)
 avatarSpinnerOuter.Visible = false
@@ -376,26 +513,31 @@ modalSpinnerOuter.Visible = false
 
 local toggleDimensionBtn = Instance.new("TextButton")
 toggleDimensionBtn.Name = "ToggleDimensionBtn"
-toggleDimensionBtn.Size = UDim2.new(0, 32, 0, 20)
-toggleDimensionBtn.Position = UDim2.new(1, -36, 1, -24)
-toggleDimensionBtn.BackgroundColor3 = Color3.fromRGB(0, 112, 255)
+toggleDimensionBtn.Size = UDim2.new(0, 28, 0, 18)
+toggleDimensionBtn.Position = UDim2.new(1, -34, 0, 8)
+toggleDimensionBtn.BackgroundColor3 = currentTheme.CARD
 toggleDimensionBtn.Text = "2D"
-toggleDimensionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleDimensionBtn.TextSize = 10
+toggleDimensionBtn.TextColor3 = currentTheme.TEXT
+toggleDimensionBtn.TextSize = 9
 toggleDimensionBtn.Font = Enum.Font.BuilderSansBold
 toggleDimensionBtn.ZIndex = 5
-toggleDimensionBtn.Parent = avatarContainer
+toggleDimensionBtn.Parent = profileContentGroup
 
 local tdCorner = Instance.new("UICorner")
 tdCorner.CornerRadius = UDim.new(0, 4)
 tdCorner.Parent = toggleDimensionBtn
 
+local tdStroke = Instance.new("UIStroke")
+tdStroke.Color = currentTheme.STROKE
+tdStroke.Thickness = 1
+tdStroke.Parent = toggleDimensionBtn
+
 local displayLabel = Instance.new("TextLabel")
-displayLabel.Size = UDim2.new(1, -115, 0, 20)
-displayLabel.Position = UDim2.new(0, 105, 0, 12)
+displayLabel.Size = UDim2.new(1, -72, 0, 20)
+displayLabel.Position = UDim2.new(0, 64, 0, isMobile and 98 or 118)
 displayLabel.BackgroundTransparency = 1
 displayLabel.TextColor3 = currentTheme.TEXT
-displayLabel.TextSize = isMobile and 13 or 12
+displayLabel.TextSize = isMobile and 13 or 14
 displayLabel.Font = Enum.Font.BuilderSansBold
 displayLabel.TextXAlignment = Enum.TextXAlignment.Left
 displayLabel.TextTruncate = Enum.TextTruncate.AtEnd
@@ -403,15 +545,15 @@ displayLabel.Parent = profileContentGroup
 
 local profileVerifiedIcon = Instance.new("ImageLabel")
 profileVerifiedIcon.Name = "ProfileVerifiedIcon"
-profileVerifiedIcon.Size = UDim2.new(0, 14, 0, 14)
+profileVerifiedIcon.Size = UDim2.new(0, 12, 0, 12)
 profileVerifiedIcon.BackgroundTransparency = 1
 profileVerifiedIcon.Image = "rbxassetid://11478378840"
 profileVerifiedIcon.Visible = false
 profileVerifiedIcon.Parent = profileContentGroup
 
 local usernameLabel = Instance.new("TextLabel")
-usernameLabel.Size = UDim2.new(1, -115, 0, 16)
-usernameLabel.Position = UDim2.new(0, 105, 0, 30)
+usernameLabel.Size = UDim2.new(1, -72, 0, 14)
+usernameLabel.Position = UDim2.new(0, 64, 0, isMobile and 118 or 138)
 usernameLabel.BackgroundTransparency = 1
 usernameLabel.TextColor3 = currentTheme.SUBTEXT
 usernameLabel.TextSize = 11
@@ -420,51 +562,68 @@ usernameLabel.TextXAlignment = Enum.TextXAlignment.Left
 usernameLabel.TextTruncate = Enum.TextTruncate.AtEnd
 usernameLabel.Parent = profileContentGroup
 
-local accountCreatedLabel = Instance.new("TextLabel")
-accountCreatedLabel.Size = UDim2.new(1, -115, 0, 16)
-accountCreatedLabel.Position = UDim2.new(0, 105, 0, 46)
-accountCreatedLabel.BackgroundTransparency = 1
-accountCreatedLabel.TextColor3 = currentTheme.SUBTEXT
-accountCreatedLabel.TextSize = 10
-accountCreatedLabel.Font = Enum.Font.BuilderSans
-accountCreatedLabel.TextXAlignment = Enum.TextXAlignment.Left
-accountCreatedLabel.Parent = profileContentGroup
+local statsScrollingFrame = Instance.new("ScrollingFrame")
+statsScrollingFrame.Name = "StatsScrollingFrame"
+statsScrollingFrame.Size = UDim2.new(1, -24, 0, isMobile and 38 or 40)
+statsScrollingFrame.Position = UDim2.new(0, 12, 0, isMobile and 148 or 168)
+statsScrollingFrame.BackgroundTransparency = 1
+statsScrollingFrame.BorderSizePixel = 0
+statsScrollingFrame.ScrollBarThickness = 0
+statsScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+statsScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.X
+statsScrollingFrame.Parent = profileContentGroup
 
-local followersLabel = Instance.new("TextLabel")
-followersLabel.Size = UDim2.new(1, -115, 0, 16)
-followersLabel.Position = UDim2.new(0, 105, 0, 62)
-followersLabel.BackgroundTransparency = 1
-followersLabel.TextColor3 = currentTheme.SUBTEXT
-followersLabel.TextSize = 10
-followersLabel.Font = Enum.Font.BuilderSans
-followersLabel.TextXAlignment = Enum.TextXAlignment.Left
-followersLabel.Parent = profileContentGroup
+local statsLayout = Instance.new("UIListLayout")
+statsLayout.FillDirection = Enum.FillDirection.Horizontal
+statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+statsLayout.Padding = UDim.new(0, isMobile and 10 or 14)
+statsLayout.Parent = statsScrollingFrame
 
-local friendsLabel = Instance.new("TextLabel")
-friendsLabel.Size = UDim2.new(1, -115, 0, 16)
-friendsLabel.Position = UDim2.new(0, 105, 0, 78)
-friendsLabel.BackgroundTransparency = 1
-friendsLabel.TextColor3 = currentTheme.SUBTEXT
-friendsLabel.TextSize = 10
-friendsLabel.Font = Enum.Font.BuilderSans
-friendsLabel.TextXAlignment = Enum.TextXAlignment.Left
-friendsLabel.Parent = profileContentGroup
+local function createHorizontalStatCol(layoutOrder, defaultTitle)
+	local colFrame = Instance.new("Frame")
+	colFrame.Name = "StatCol_" .. layoutOrder
+	colFrame.LayoutOrder = layoutOrder
+	colFrame.Size = UDim2.new(0, isMobile and 75 or 85, 1, 0)
+	colFrame.BackgroundTransparency = 1
 
-local voiceStatusLabel = Instance.new("TextLabel")
-voiceStatusLabel.Size = UDim2.new(1, -115, 0, 16)
-voiceStatusLabel.Position = UDim2.new(0, 105, 0, 94)
-voiceStatusLabel.BackgroundTransparency = 1
-voiceStatusLabel.TextColor3 = currentTheme.SUBTEXT
-voiceStatusLabel.TextSize = 10
-voiceStatusLabel.Font = Enum.Font.BuilderSansMedium
-voiceStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-voiceStatusLabel.Parent = profileContentGroup
+	local valLabel = Instance.new("TextLabel")
+	valLabel.Name = "ValueLabel"
+	valLabel.Size = UDim2.new(1, 0, 0, 16)
+	valLabel.Position = UDim2.new(0, 0, 0, 0)
+	valLabel.BackgroundTransparency = 1
+	valLabel.TextColor3 = currentTheme.TEXT
+	valLabel.TextSize = isMobile and 12 or 13
+	valLabel.Font = Enum.Font.BuilderSansBold
+	valLabel.TextXAlignment = Enum.TextXAlignment.Left
+	valLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	valLabel.Text = "..."
+	valLabel.Parent = colFrame
 
--- API de Descrição do Usuário (até 2 linhas com limite truncado)
+	local titleLabel = Instance.new("TextLabel")
+	titleLabel.Name = "TitleLabel"
+	titleLabel.Size = UDim2.new(1, 0, 0, 12)
+	titleLabel.Position = UDim2.new(0, 0, 0, 16)
+	titleLabel.BackgroundTransparency = 1
+	titleLabel.TextColor3 = currentTheme.SUBTEXT
+	titleLabel.TextSize = 9
+	titleLabel.Font = Enum.Font.BuilderSans
+	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+	titleLabel.TextTruncate = Enum.TextTruncate.AtEnd
+	titleLabel.Text = defaultTitle
+	titleLabel.Parent = colFrame
+
+	colFrame.Parent = statsScrollingFrame
+	return colFrame, valLabel, titleLabel
+end
+
+local friendsRow, friendsVal, friendsTitle = createHorizontalStatCol(1, currentLang.Friends)
+local followersRow, followersVal, followersTitle = createHorizontalStatCol(2, currentLang.Followers)
+local createdRow, createdVal, createdTitle = createHorizontalStatCol(3, currentLang.Created)
+
 local userDescriptionLabel = Instance.new("TextLabel")
 userDescriptionLabel.Name = "UserDescriptionLabel"
-userDescriptionLabel.Size = UDim2.new(1, -24, 0, 28)
-userDescriptionLabel.Position = UDim2.new(0, 12, 0, 116)
+userDescriptionLabel.Size = UDim2.new(1, -24, 0, 26)
+userDescriptionLabel.Position = UDim2.new(0, 12, 0, isMobile and 192 or 214)
 userDescriptionLabel.BackgroundTransparency = 1
 userDescriptionLabel.TextColor3 = currentTheme.SUBTEXT
 userDescriptionLabel.TextSize = 10
@@ -476,63 +635,102 @@ userDescriptionLabel.TextTruncate = Enum.TextTruncate.AtEnd
 userDescriptionLabel.Text = "..."
 userDescriptionLabel.Parent = profileContentGroup
 
+local voiceStatusLabel = Instance.new("TextLabel")
+voiceStatusLabel.Size = UDim2.new(1, -24, 0, 12)
+voiceStatusLabel.Position = UDim2.new(0, 12, 0, isMobile and 222 or 246)
+voiceStatusLabel.BackgroundTransparency = 1
+voiceStatusLabel.TextColor3 = currentTheme.SUBTEXT
+voiceStatusLabel.TextSize = 9
+voiceStatusLabel.Font = Enum.Font.BuilderSansMedium
+voiceStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+voiceStatusLabel.Parent = profileContentGroup
+
 local buttonsContainer = Instance.new("Frame")
-buttonsContainer.Size = UDim2.new(1, -24, 0, 185)
-buttonsContainer.Position = UDim2.new(0, 12, 0, 150)
+buttonsContainer.Name = "ButtonsContainer"
+buttonsContainer.Size = UDim2.new(1, -24, 0, 28)
+buttonsContainer.Position = UDim2.new(0, 12, 0, isMobile and 240 or 266)
 buttonsContainer.BackgroundTransparency = 1
 buttonsContainer.Parent = profileContentGroup
 
-local btnLayout = Instance.new("UIListLayout")
-btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
-btnLayout.Padding = UDim.new(0, 5)
-btnLayout.Parent = buttonsContainer
+local btnGrid = Instance.new("UIGridLayout")
+btnGrid.CellSize = UDim2.new(0.235, 0, 1, 0)
+btnGrid.CellPadding = UDim2.new(0.02, 0, 0, 0)
+btnGrid.SortOrder = Enum.SortOrder.LayoutOrder
+btnGrid.Parent = buttonsContainer
 
-local function createProfileButton(text, isRed)
+local function createInlineButton(text, isPrimary, isRed, layoutOrder)
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(1, 0, 0, isMobile and 30 or 28)
-	btn.BackgroundColor3 = isRed and Color3.fromRGB(245, 52, 60) or Color3.fromRGB(0, 112, 255)
+	btn.LayoutOrder = layoutOrder
 	btn.BorderSizePixel = 0
+	
+	if isRed then
+		btn.BackgroundColor3 = Color3.fromRGB(180, 40, 45)
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	elseif isPrimary then
+		btn.BackgroundColor3 = currentTheme.TEXT
+		btn.TextColor3 = currentTheme.BG
+	else
+		btn.BackgroundColor3 = currentTheme.CARD
+		btn.TextColor3 = currentTheme.TEXT
+	end
+
 	btn.Text = text
-	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	btn.TextSize = 11
+	btn.TextSize = isMobile and 8 or 9
 	btn.Font = Enum.Font.BuilderSansBold
+	btn.TextWrapped = true
+
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 6)
+	c.CornerRadius = UDim.new(0, 5)
 	c.Parent = btn
+
+	local s = Instance.new("UIStroke")
+	s.Name = "BtnStroke"
+	s.Color = isRed and Color3.fromRGB(200, 50, 55) or currentTheme.STROKE
+	s.Thickness = 1
+	s.Transparency = isPrimary and 1 or 0
+	s.Parent = btn
+
 	btn.Parent = buttonsContainer
 	return btn
 end
 
-local blockBtn = createProfileButton(currentLang.Block, true)
-local avatarBtn = createProfileButton(currentLang.ViewAvatar, false)
-local friendBtn = createProfileButton(currentLang.AddFriend, false)
-local disrespectfulBtn = createProfileButton(currentLang.Disrespectful, true)
+local friendBtn = createInlineButton(currentLang.AddFriend, true, false, 1)
+local avatarBtn = createInlineButton(currentLang.ViewAvatar, false, false, 2)
+local blockBtn = createInlineButton(currentLang.Block, false, true, 3)
+local disrespectfulBtn = createInlineButton(currentLang.Disrespectful, false, false, 4)
 
 local closeProfileBtn = Instance.new("TextButton")
-closeProfileBtn.Size = UDim2.new(1, -24, 0, isMobile and 30 or 28)
-closeProfileBtn.Position = UDim2.new(0, 12, 1, -36)
+closeProfileBtn.Name = "CloseProfileBtn"
+closeProfileBtn.Size = UDim2.new(1, -24, 0, 28)
+closeProfileBtn.Position = UDim2.new(0, 12, 1, -34)
 closeProfileBtn.BackgroundColor3 = currentTheme.CARD
 closeProfileBtn.Text = currentLang.Close
 closeProfileBtn.TextColor3 = currentTheme.TEXT
-closeProfileBtn.TextSize = 11
+closeProfileBtn.TextSize = 10
 closeProfileBtn.Font = Enum.Font.BuilderSansBold
-closeProfileBtn.Parent = profileContentGroup
+closeProfileBtn.Parent = profileModal
 
 local cpCorner = Instance.new("UICorner")
 cpCorner.CornerRadius = UDim.new(0, 6)
 cpCorner.Parent = closeProfileBtn
 
+local cpStroke = Instance.new("UIStroke")
+cpStroke.Color = currentTheme.STROKE
+cpStroke.Thickness = 1
+cpStroke.Parent = closeProfileBtn
+
 local confirmModal = Instance.new("CanvasGroup")
 confirmModal.Name = "ConfirmModal"
-confirmModal.Size = isMobile and UDim2.new(0, 270, 0, 160) or UDim2.new(0, 310, 0, 170)
-confirmModal.Position = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
+confirmModal.Size = isMobile and UDim2.new(0, 250, 0, 140) or UDim2.new(0, 280, 0, 150)
+confirmModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+confirmModal.AnchorPoint = Vector2.new(0.5, 0.5)
 confirmModal.BackgroundColor3 = currentTheme.BG
 confirmModal.GroupTransparency = 1
 confirmModal.Visible = false
 confirmModal.Parent = screenGui
 
 local cmCorner = Instance.new("UICorner")
-cmCorner.CornerRadius = UDim.new(0, 10)
+cmCorner.CornerRadius = UDim.new(0, 8)
 cmCorner.Parent = confirmModal
 
 local cmStroke = Instance.new("UIStroke")
@@ -541,8 +739,8 @@ cmStroke.Thickness = 1
 cmStroke.Parent = confirmModal
 
 local cmText = Instance.new("TextLabel")
-cmText.Size = UDim2.new(1, -24, 0, 75)
-cmText.Position = UDim2.new(0, 12, 0, 12)
+cmText.Size = UDim2.new(1, -20, 0, 60)
+cmText.Position = UDim2.new(0, 10, 0, 10)
 cmText.BackgroundTransparency = 1
 cmText.TextColor3 = currentTheme.TEXT
 cmText.TextSize = 10
@@ -553,8 +751,8 @@ cmText.TextYAlignment = Enum.TextYAlignment.Top
 cmText.Parent = confirmModal
 
 local cmBtnContainer = Instance.new("Frame")
-cmBtnContainer.Size = UDim2.new(1, -24, 0, 32)
-cmBtnContainer.Position = UDim2.new(0, 12, 1, -40)
+cmBtnContainer.Size = UDim2.new(1, -20, 0, 28)
+cmBtnContainer.Position = UDim2.new(0, 10, 1, -34)
 cmBtnContainer.BackgroundTransparency = 1
 cmBtnContainer.Parent = confirmModal
 
@@ -567,33 +765,40 @@ cmLayout.Parent = cmBtnContainer
 
 local function createConfirmButton(text, isRed, width)
 	local btn = Instance.new("TextButton")
-	btn.Size = UDim2.new(0, width or 80, 1, 0)
-	btn.BackgroundColor3 = isRed and Color3.fromRGB(245, 52, 60) or currentTheme.CARD
+	btn.Size = UDim2.new(0, width or 75, 1, 0)
+	btn.BackgroundColor3 = isRed and Color3.fromRGB(180, 40, 45) or currentTheme.CARD
 	btn.Text = text
 	btn.TextColor3 = currentTheme.TEXT
 	btn.TextSize = 10
 	btn.Font = Enum.Font.BuilderSansBold
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, 6)
+	c.CornerRadius = UDim.new(0, 5)
 	c.Parent = btn
+	
+	local s = Instance.new("UIStroke")
+	s.Color = isRed and Color3.fromRGB(200, 50, 55) or currentTheme.STROKE
+	s.Thickness = 1
+	s.Parent = btn
+	
 	btn.Parent = cmBtnContainer
 	return btn
 end
 
-local cmCancelBtn = createConfirmButton(currentLang.Close, false, 75)
-local cmActionBtn = createConfirmButton(currentLang.Confirm, true, 85)
+local cmCancelBtn = createConfirmButton(currentLang.Close, false, 70)
+local cmActionBtn = createConfirmButton(currentLang.Confirm, true, 80)
 
 local settingsModal = Instance.new("CanvasGroup")
 settingsModal.Name = "SettingsModal"
-settingsModal.Size = isMobile and UDim2.new(0, 260, 0, 220) or UDim2.new(0, 280, 0, 240)
-settingsModal.Position = isMobile and UDim2.new(0.5, -130, 0.5, -110) or UDim2.new(0.5, -140, 0.5, -120)
+settingsModal.Size = isMobile and UDim2.new(0, 240, 0, 190) or UDim2.new(0, 260, 0, 210)
+settingsModal.Position = UDim2.new(0.5, 0, 0.5, 0)
+settingsModal.AnchorPoint = Vector2.new(0.5, 0.5)
 settingsModal.BackgroundColor3 = currentTheme.BG
 settingsModal.GroupTransparency = 1
 settingsModal.Visible = false
 settingsModal.Parent = screenGui
 
 local setCorner = Instance.new("UICorner")
-setCorner.CornerRadius = UDim.new(0, 10)
+setCorner.CornerRadius = UDim.new(0, 8)
 setCorner.Parent = settingsModal
 
 local setStroke = Instance.new("UIStroke")
@@ -602,78 +807,90 @@ setStroke.Thickness = 1
 setStroke.Parent = settingsModal
 
 local setLabel = Instance.new("TextLabel")
-setLabel.Size = UDim2.new(1, -24, 0, 30)
-setLabel.Position = UDim2.new(0, 12, 0, 8)
+setLabel.Size = UDim2.new(1, -20, 0, 28)
+setLabel.Position = UDim2.new(0, 10, 0, 6)
 setLabel.BackgroundTransparency = 1
 setLabel.Text = currentLang.Settings
 setLabel.TextColor3 = currentTheme.TEXT
-setLabel.TextSize = 12
+setLabel.TextSize = 11
 setLabel.Font = Enum.Font.BuilderSansBold
 setLabel.TextXAlignment = Enum.TextXAlignment.Left
 setLabel.Parent = settingsModal
 
 local themeSelectBtn = Instance.new("TextButton")
-themeSelectBtn.Size = UDim2.new(1, -24, 0, 32)
-themeSelectBtn.Position = UDim2.new(0, 12, 0, 48)
+themeSelectBtn.Size = UDim2.new(1, -20, 0, 28)
+themeSelectBtn.Position = UDim2.new(0, 10, 0, 42)
 themeSelectBtn.BackgroundColor3 = currentTheme.CARD
 themeSelectBtn.Text = currentLang.Theme .. ": " .. settingsData.Theme
 themeSelectBtn.TextColor3 = currentTheme.TEXT
-themeSelectBtn.TextSize = 11
+themeSelectBtn.TextSize = 10
 themeSelectBtn.Font = Enum.Font.BuilderSansMedium
 themeSelectBtn.Parent = settingsModal
 
 local tCorner = Instance.new("UICorner")
-tCorner.CornerRadius = UDim.new(0, 6)
+tCorner.CornerRadius = UDim.new(0, 5)
 tCorner.Parent = themeSelectBtn
 
+local tStroke = Instance.new("UIStroke")
+tStroke.Color = currentTheme.STROKE
+tStroke.Thickness = 1
+tStroke.Parent = themeSelectBtn
+
 local langSelectBtn = Instance.new("TextButton")
-langSelectBtn.Size = UDim2.new(1, -24, 0, 32)
-langSelectBtn.Position = UDim2.new(0, 12, 0, 88)
+langSelectBtn.Size = UDim2.new(1, -20, 0, 28)
+langSelectBtn.Position = UDim2.new(0, 10, 0, 78)
 langSelectBtn.BackgroundColor3 = currentTheme.CARD
 langSelectBtn.Text = currentLang.Lang .. ": " .. string.upper(settingsData.Language)
 langSelectBtn.TextColor3 = currentTheme.TEXT
-langSelectBtn.TextSize = 11
+langSelectBtn.TextSize = 10
 langSelectBtn.Font = Enum.Font.BuilderSansMedium
 langSelectBtn.Parent = settingsModal
 
 local lCorner = Instance.new("UICorner")
-lCorner.CornerRadius = UDim.new(0, 6)
+lCorner.CornerRadius = UDim.new(0, 5)
 lCorner.Parent = langSelectBtn
 
 local closeSettingsBtn = Instance.new("TextButton")
-closeSettingsBtn.Size = UDim2.new(1, -24, 0, 32)
-closeSettingsBtn.Position = UDim2.new(0, 12, 1, -40)
+closeSettingsBtn.Size = UDim2.new(1, -20, 0, 28)
+closeSettingsBtn.Position = UDim2.new(0, 10, 1, -34)
 closeSettingsBtn.BackgroundColor3 = currentTheme.CARD
 closeSettingsBtn.Text = currentLang.Close
 closeSettingsBtn.TextColor3 = currentTheme.TEXT
-closeSettingsBtn.TextSize = 11
+closeSettingsBtn.TextSize = 10
 closeSettingsBtn.Font = Enum.Font.BuilderSansBold
 closeSettingsBtn.Parent = settingsModal
 
 local csCorner = Instance.new("UICorner")
-csCorner.CornerRadius = UDim.new(0, 6)
+csCorner.CornerRadius = UDim.new(0, 5)
 csCorner.Parent = closeSettingsBtn
+
+local csStroke = Instance.new("UIStroke")
+csStroke.Color = currentTheme.STROKE
+csStroke.Thickness = 1
+csStroke.Parent = closeSettingsBtn
 
 local themeKeys = {"dark", "dark_red", "dark_blue", "dark_green", "dark_purple", "light"}
 local langKeys = {"en", "pt", "es"}
 
-local popInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+--------------------------------------------------------------------------------
+-- ANIMAÇÕES ANTIGAS RESTAURADAS (INCLUINDO EFEITO DE DESAPARECER PRA BAIXO NO CARD)
+--------------------------------------------------------------------------------
+local popInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
 
-local function animateOpen(frame, targetPos)
-	frame.Position = UDim2.new(targetPos.X.Scale, targetPos.X.Offset, targetPos.Y.Scale, targetPos.Y.Offset - 20)
+local function animateOpen(frame)
 	frame.GroupTransparency = 1
+	frame.Position = UDim2.new(0.5, 0, 0.5, 30)
 	frame.Visible = true
 	TweenService:Create(frame, popInfo, {
-		Position = targetPos,
-		GroupTransparency = 0
+		GroupTransparency = 0,
+		Position = UDim2.new(0.5, 0, 0.5, 0)
 	}):Play()
 end
 
-local function animateClose(frame, targetPos, callback)
-	local exitPos = UDim2.new(targetPos.X.Scale, targetPos.X.Offset, targetPos.Y.Scale, targetPos.Y.Offset - 20)
+local function animateClose(frame, callback)
 	local tw = TweenService:Create(frame, popInfo, {
-		Position = exitPos,
-		GroupTransparency = 1
+		GroupTransparency = 1,
+		Position = UDim2.new(0.5, 0, 0.5, 30)
 	})
 	tw:Play()
 	tw.Completed:Connect(function()
@@ -682,7 +899,6 @@ local function animateClose(frame, targetPos, callback)
 	end)
 end
 
--- Lógica de Controle do Avatar 3D
 local renderConnection = nil
 local currentModel3D = nil
 local is3DMode = false
@@ -781,8 +997,8 @@ local requestUpdate
 local updatePlayerRowOnly
 
 local function applyThemeAndLang()
-	currentTheme = Themes[settingsData.Theme]
-	currentLang = Translations[settingsData.Language]
+	currentTheme = Themes[settingsData.Theme] or Themes.dark
+	currentLang = Translations[settingsData.Language] or Translations.en
 	
 	toggleBtn.BackgroundColor3 = currentTheme.BG
 	toggleBtn.TextColor3 = currentTheme.TEXT
@@ -792,7 +1008,18 @@ local function applyThemeAndLang()
 	lbStroke.Color = currentTheme.STROKE
 	lbTitle.Text = currentLang.Title
 	lbTitle.TextColor3 = currentTheme.TEXT
+	settingsIconBtn.TextColor3 = currentTheme.SUBTEXT
+
+	searchFrame.BackgroundColor3 = currentTheme.CARD
+	searchStroke.Color = currentTheme.STROKE
+	searchInput.TextColor3 = currentTheme.TEXT
+	searchInput.PlaceholderColor3 = currentTheme.SUBTEXT
+	searchInput.PlaceholderText = currentLang.SearchPlaceholder
+
 	scrollingPlayers.ScrollBarImageColor3 = currentTheme.STROKE
+	profileModalScroll.ScrollBarImageColor3 = currentTheme.STROKE
+	
+	backgroundBanner.BackgroundColor3 = currentTheme.CARD
 	
 	spinnerOuter.BackgroundColor3 = currentTheme.SPINNER
 	spinnerInner.BackgroundColor3 = currentTheme.BG
@@ -800,17 +1027,41 @@ local function applyThemeAndLang()
 	
 	profileModal.BackgroundColor3 = currentTheme.BG
 	pmStroke.Color = currentTheme.STROKE
-	avatarContainer.BackgroundColor3 = currentTheme.CARD
 	displayLabel.TextColor3 = currentTheme.TEXT
 	usernameLabel.TextColor3 = currentTheme.SUBTEXT
-	accountCreatedLabel.TextColor3 = currentTheme.SUBTEXT
-	followersLabel.TextColor3 = currentTheme.SUBTEXT
-	friendsLabel.TextColor3 = currentTheme.SUBTEXT
-	voiceStatusLabel.TextColor3 = currentTheme.SUBTEXT
 	userDescriptionLabel.TextColor3 = currentTheme.SUBTEXT
+	voiceStatusLabel.TextColor3 = currentTheme.SUBTEXT
+	
 	closeProfileBtn.BackgroundColor3 = currentTheme.CARD
 	closeProfileBtn.TextColor3 = currentTheme.TEXT
 	closeProfileBtn.Text = currentLang.Close
+	cpStroke.Color = currentTheme.STROKE
+	
+	headshotContainer.BackgroundColor3 = currentTheme.BG
+	hsStroke.Color = currentTheme.STROKE
+	
+	friendsVal.TextColor3 = currentTheme.TEXT
+	friendsTitle.TextColor3 = currentTheme.SUBTEXT
+	friendsTitle.Text = currentLang.Friends
+	
+	followersVal.TextColor3 = currentTheme.TEXT
+	followersTitle.TextColor3 = currentTheme.SUBTEXT
+	followersTitle.Text = currentLang.Followers
+	
+	createdVal.TextColor3 = currentTheme.TEXT
+	createdTitle.TextColor3 = currentTheme.SUBTEXT
+	createdTitle.Text = currentLang.Created
+
+	avatarBtn.BackgroundColor3 = currentTheme.CARD
+	avatarBtn.TextColor3 = currentTheme.TEXT
+	if avatarBtn:FindFirstChild("BtnStroke") then avatarBtn.BtnStroke.Color = currentTheme.STROKE end
+
+	disrespectfulBtn.BackgroundColor3 = currentTheme.CARD
+	disrespectfulBtn.TextColor3 = currentTheme.TEXT
+	if disrespectfulBtn:FindFirstChild("BtnStroke") then disrespectfulBtn.BtnStroke.Color = currentTheme.STROKE end
+
+	friendBtn.BackgroundColor3 = currentTheme.TEXT
+	friendBtn.TextColor3 = currentTheme.BG
 	
 	confirmModal.BackgroundColor3 = currentTheme.BG
 	cmStroke.Color = currentTheme.STROKE
@@ -857,27 +1108,25 @@ langSelectBtn.MouseButton1Click:Connect(function()
 end)
 
 settingsIconBtn.MouseButton1Click:Connect(function()
-	local pos = isMobile and UDim2.new(0.5, -130, 0.5, -110) or UDim2.new(0.5, -140, 0.5, -120)
 	if settingsModal.Visible then
-		animateClose(settingsModal, pos)
+		animateClose(settingsModal)
 	else
-		animateOpen(settingsModal, pos)
+		animateOpen(settingsModal)
 	end
 end)
 
 closeSettingsBtn.MouseButton1Click:Connect(function()
-	local pos = isMobile and UDim2.new(0.5, -130, 0.5, -110) or UDim2.new(0.5, -140, 0.5, -120)
-	animateClose(settingsModal, pos)
+	animateClose(settingsModal)
 end)
 
 local isOpen = false
 
 local function closeLeaderboard()
 	isOpen = false
-	toggleBtn.Text = "➔"
-	TweenService:Create(toggleBtn, popInfo, {Position = UDim2.new(1, -48, 0, 10)}):Play()
+	toggleBtn.Text = "<"
+	TweenService:Create(toggleBtn, popInfo, {Position = UDim2.new(1, -38, 0, 12)}):Play()
 	
-	local targetLbPos = UDim2.new(1, 10, 0, 52)
+	local targetLbPos = UDim2.new(1, 10, 0, 48)
 	local tw = TweenService:Create(leaderboardFrame, popInfo, {Position = targetLbPos, GroupTransparency = 1})
 	tw:Play()
 	tw.Completed:Connect(function()
@@ -887,28 +1136,25 @@ local function closeLeaderboard()
 	end)
 	
 	if profileModal.Visible then
-		local pos = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
-		animateClose(profileModal, pos)
+		animateClose(profileModal)
 	end
 	if confirmModal.Visible then
-		local pos = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
-		animateClose(confirmModal, pos)
+		animateClose(confirmModal)
 	end
 	if settingsModal.Visible then
-		local pos = isMobile and UDim2.new(0.5, -130, 0.5, -110) or UDim2.new(0.5, -140, 0.5, -120)
-		animateClose(settingsModal, pos)
+		animateClose(settingsModal)
 	end
 end
 
 toggleBtn.MouseButton1Click:Connect(function()
 	isOpen = not isOpen
 	if isOpen then
-		toggleBtn.Text = "⬅"
+		toggleBtn.Text = ">"
 		leaderboardFrame.Visible = true
-		local offsetLb = isMobile and -330 or -430
-		local offsetBtn = isMobile and -370 or -470
-		TweenService:Create(toggleBtn, popInfo, {Position = UDim2.new(1, offsetBtn, 0, 10)}):Play()
-		TweenService:Create(leaderboardFrame, popInfo, {Position = UDim2.new(1, offsetLb, 0, 52), GroupTransparency = 0}):Play()
+		local offsetLb = isMobile and -310 or -390
+		local offsetBtn = isMobile and -350 or -430
+		TweenService:Create(toggleBtn, popInfo, {Position = UDim2.new(1, offsetBtn, 0, 12)}):Play()
+		TweenService:Create(leaderboardFrame, popInfo, {Position = UDim2.new(1, offsetLb, 0, 48), GroupTransparency = 0}):Play()
 	else
 		closeLeaderboard()
 	end
@@ -987,7 +1233,7 @@ end
 local function getPlayerBadges(plr)
 	local badges = ""
 	if settingsData.DisrespectfulUsers[tostring(plr.UserId)] then
-		badges = badges .. "👩‍⚖️ "
+		badges = badges .. "🚩 "
 	end
 	if (game.CreatorType == Enum.CreatorType.User and game.CreatorId == plr.UserId) or
 	   (game.CreatorType == Enum.CreatorType.Group and plr:GetRankInGroup(game.CreatorId) == 255) then
@@ -1071,6 +1317,71 @@ local function getPlayerPrimaryStat(plr)
 	return 0
 end
 
+--------------------------------------------------------------------------------
+-- LÓGICA DE AUTO-COMPLETE E FILTRAGEM DE PESQUISA
+--------------------------------------------------------------------------------
+local isAutocompleteUpdating = false
+
+local function filterAndAutocomplete()
+	if isAutocompleteUpdating then return end
+	local query = searchInput.Text
+	local queryLower = string.lower(query)
+	
+	if query ~= "" then
+		local bestMatchUsername = nil
+		
+		-- Busca por username e displayname
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local uName = string.lower(plr.Name)
+			local dName = string.lower(plr.DisplayName)
+			
+			-- Se digitar letras de username ou começo de displayname
+			if string.sub(uName, 1, #queryLower) == queryLower or string.sub(dName, 1, #queryLower) == queryLower then
+				bestMatchUsername = plr.Name
+				break
+			end
+		end
+		
+		-- Auto-completa o texto com o username correspondente
+		if bestMatchUsername and #bestMatchUsername > #query then
+			isAutocompleteUpdating = true
+			local cursorPos = searchInput.CursorPosition
+			searchInput.Text = bestMatchUsername
+			if cursorPos > 0 and cursorPos <= #bestMatchUsername then
+				searchInput.SelectionStart = cursorPos
+				searchInput.CursorPosition = #bestMatchUsername + 1
+			end
+			queryLower = string.lower(bestMatchUsername)
+			isAutocompleteUpdating = false
+		end
+	end
+
+	-- Filtrar visibilidade das linhas de jogadores
+	for _, child in ipairs(scrollingPlayers:GetChildren()) do
+		if child:IsA("TextButton") and string.sub(child.Name, 1, 10) == "PlayerRow_" then
+			local uid = tonumber(string.sub(child.Name, 11))
+			local plr = uid and Players:GetPlayerByUserId(uid)
+			if plr then
+				if queryLower == "" then
+					child.Visible = true
+				else
+					local uName = string.lower(plr.Name)
+					local dName = string.lower(plr.DisplayName)
+					if string.find(uName, queryLower, 1, true) or string.find(dName, queryLower, 1, true) then
+						child.Visible = true
+					else
+						child.Visible = false
+					end
+				end
+			end
+		end
+	end
+end
+
+searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+	filterAndAutocomplete()
+end)
+
 local isUpdatingList = false
 local updatePending = false
 
@@ -1079,9 +1390,6 @@ updatePlayerRowOnly = function(plr)
 	if not row then return false end
 	
 	local activeStats = getGameStatsList()
-	local numStats = activeStats and #activeStats or 0
-	local statWidth = 42
-	local badgesWidth = 45
 
 	if activeStats then
 		for i, statName in ipairs(activeStats) do
@@ -1113,7 +1421,6 @@ updatePlayerList = function(showLoading)
 	end
 
 	pcall(function()
-		-- Desativa ajuste automático durante reestruturação para evitar travamentos e mudanças abruptas no scroll
 		scrollingPlayers.AutomaticCanvasSize = Enum.AutomaticSize.None
 
 		for _, child in ipairs(scrollingPlayers:GetChildren()) do
@@ -1160,20 +1467,20 @@ updatePlayerList = function(showLoading)
 		if #allTeams == 0 and activeStats then
 			local headerFrame = Instance.new("Frame")
 			headerFrame.Name = "HeaderFrame"
-			headerFrame.Size = UDim2.new(1, 0, 0, 20)
+			headerFrame.Size = UDim2.new(1, 0, 0, 18)
 			headerFrame.BackgroundTransparency = 1
 
-			local statWidth = 42
-			local badgesWidth = 45
-			local nameWidthOffset = (numStats * statWidth) + badgesWidth + 40
+			local statWidth = 38
+			local badgesWidth = 40
+			local nameWidthOffset = (numStats * statWidth) + badgesWidth + 35
 
 			local nameHeader = Instance.new("TextLabel")
 			nameHeader.Size = UDim2.new(1, -nameWidthOffset, 1, 0)
-			nameHeader.Position = UDim2.new(0, 36, 0, 0)
+			nameHeader.Position = UDim2.new(0, 32, 0, 0)
 			nameHeader.BackgroundTransparency = 1
 			nameHeader.Text = "Name"
 			nameHeader.TextColor3 = currentTheme.SUBTEXT
-			nameHeader.TextSize = 10
+			nameHeader.TextSize = 9
 			nameHeader.Font = Enum.Font.BuilderSansBold
 			nameHeader.TextXAlignment = Enum.TextXAlignment.Left
 			nameHeader.Parent = headerFrame
@@ -1181,12 +1488,12 @@ updatePlayerList = function(showLoading)
 			for i, statName in ipairs(activeStats) do
 				local statHeader = Instance.new("TextLabel")
 				statHeader.Size = UDim2.new(0, statWidth, 1, 0)
-				local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 5
+				local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 4
 				statHeader.Position = UDim2.new(1, rightOffset, 0, 0)
 				statHeader.BackgroundTransparency = 1
 				statHeader.Text = statName
 				statHeader.TextColor3 = currentTheme.SUBTEXT
-				statHeader.TextSize = 9
+				statHeader.TextSize = 8
 				statHeader.Font = Enum.Font.BuilderSansBold
 				statHeader.TextXAlignment = Enum.TextXAlignment.Center
 				statHeader.TextTruncate = Enum.TextTruncate.AtEnd
@@ -1199,19 +1506,24 @@ updatePlayerList = function(showLoading)
 		local function createPlayerRow(plr)
 			local row = Instance.new("TextButton")
 			row.Name = "PlayerRow_" .. plr.UserId
-			row.Size = UDim2.new(1, 0, 0, isMobile and 38 or 34)
+			row.Size = UDim2.new(1, 0, 0, isMobile and 32 or 28)
 			row.BackgroundColor3 = currentTheme.CARD
 			row.BorderSizePixel = 0
 			row.Text = ""
 			
 			local rc = Instance.new("UICorner")
-			rc.CornerRadius = UDim.new(0, 6)
+			rc.CornerRadius = UDim.new(0, 5)
 			rc.Parent = row
+
+			local rStroke = Instance.new("UIStroke")
+			rStroke.Color = currentTheme.STROKE
+			rStroke.Thickness = 1
+			rStroke.Parent = row
 			
 			local avatarThumb = Instance.new("ImageLabel")
 			avatarThumb.Name = "AvatarThumb"
-			avatarThumb.Size = UDim2.new(0, 26, 0, 26)
-			avatarThumb.Position = UDim2.new(0, 5, 0.5, -13)
+			avatarThumb.Size = UDim2.new(0, 20, 0, 20)
+			avatarThumb.Position = UDim2.new(0, 5, 0.5, -10)
 			avatarThumb.BackgroundColor3 = currentTheme.BG
 			avatarThumb.Image = "rbxthumb://type=AvatarHeadShot&id=" .. plr.UserId .. "&w=150&h=150"
 			avatarThumb.Parent = row
@@ -1220,18 +1532,18 @@ updatePlayerList = function(showLoading)
 			atc.CornerRadius = UDim.new(1, 0)
 			atc.Parent = avatarThumb
 
-			local statWidth = 42
-			local badgesWidth = 45
-			local nameWidthOffset = (numStats * statWidth) + badgesWidth + 40
+			local statWidth = 38
+			local badgesWidth = 40
+			local nameWidthOffset = (numStats * statWidth) + badgesWidth + 35
 			
 			local nameTxt = Instance.new("TextLabel")
 			nameTxt.Name = "NameTxt"
 			nameTxt.Size = UDim2.new(1, -nameWidthOffset, 1, 0)
-			nameTxt.Position = UDim2.new(0, 36, 0, 0)
+			nameTxt.Position = UDim2.new(0, 30, 0, 0)
 			nameTxt.BackgroundTransparency = 1
 			nameTxt.Text = plr.DisplayName
 			nameTxt.TextColor3 = currentTheme.TEXT
-			nameTxt.TextSize = isMobile and 11 or 10
+			nameTxt.TextSize = isMobile and 10 or 9
 			nameTxt.Font = Enum.Font.BuilderSansMedium
 			nameTxt.TextXAlignment = Enum.TextXAlignment.Left
 			nameTxt.TextTruncate = Enum.TextTruncate.AtEnd
@@ -1243,8 +1555,8 @@ updatePlayerList = function(showLoading)
 				
 				local vBadgeIcon = Instance.new("ImageLabel")
 				vBadgeIcon.Name = "VerifiedBadge"
-				vBadgeIcon.Size = UDim2.new(0, 13, 0, 13)
-				vBadgeIcon.Position = UDim2.new(1, 4, 0.5, -6)
+				vBadgeIcon.Size = UDim2.new(0, 11, 0, 11)
+				vBadgeIcon.Position = UDim2.new(1, 3, 0.5, -5)
 				vBadgeIcon.BackgroundTransparency = 1
 				vBadgeIcon.Image = "rbxassetid://11478378840"
 				vBadgeIcon.Parent = nameTxt
@@ -1255,12 +1567,12 @@ updatePlayerList = function(showLoading)
 					local statTxt = Instance.new("TextLabel")
 					statTxt.Name = "Stat_" .. statName
 					statTxt.Size = UDim2.new(0, statWidth, 1, 0)
-					local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 5
+					local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 4
 					statTxt.Position = UDim2.new(1, rightOffset, 0, 0)
 					statTxt.BackgroundTransparency = 1
 					local val = getPlayerStatValue(plr, statName)
 					statTxt.Text = type(val) == "number" and formatNumber(val) or tostring(val)
-					statTxt.TextColor3 = Color3.fromRGB(255, 215, 0)
+					statTxt.TextColor3 = currentTheme.TEXT
 					statTxt.TextSize = 9
 					statTxt.Font = Enum.Font.BuilderSansBold
 					statTxt.TextXAlignment = Enum.TextXAlignment.Center
@@ -1276,7 +1588,7 @@ updatePlayerList = function(showLoading)
 			statusBadges.BackgroundTransparency = 1
 			statusBadges.Text = getPlayerBadges(plr)
 			statusBadges.TextColor3 = currentTheme.TEXT
-			statusBadges.TextSize = 10
+			statusBadges.TextSize = 9
 			statusBadges.Font = Enum.Font.BuilderSans
 			statusBadges.TextXAlignment = Enum.TextXAlignment.Right
 			statusBadges.Parent = row
@@ -1284,13 +1596,11 @@ updatePlayerList = function(showLoading)
 			row.MouseButton1Click:Connect(function()
 				selectedTargetPlayer = plr
 				
-				local pos = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
-				
 				profileContentGroup.GroupTransparency = 1
 				modalSpinnerOuter.Visible = true
 				modalSpinnerTween:Play()
 				
-				animateOpen(profileModal, pos)
+				animateOpen(profileModal)
 				
 				task.spawn(function()
 					cleanup3D()
@@ -1303,43 +1613,30 @@ updatePlayerList = function(showLoading)
 					if plr.HasVerifiedBadge then
 						displayLabel.AutomaticSize = Enum.AutomaticSize.X
 						displayLabel.Size = UDim2.new(0, 0, 0, 20)
-						profileVerifiedIcon.Position = UDim2.new(0, 105 + displayLabel.AbsoluteSize.X + 4, 0, 15)
+						profileVerifiedIcon.Position = UDim2.new(0, 64 + displayLabel.AbsoluteSize.X + 4, 0, isMobile and 102 or 122)
 						profileVerifiedIcon.Visible = true
 					else
 						displayLabel.AutomaticSize = Enum.AutomaticSize.None
-						displayLabel.Size = UDim2.new(1, -115, 0, 20)
+						displayLabel.Size = UDim2.new(1, -72, 0, 20)
 						profileVerifiedIcon.Visible = false
 					end
 
 					usernameLabel.Text = "@" .. plr.Name
-					accountCreatedLabel.Text = currentLang.Created .. getFormattedAccountAge(plr)
-					followersLabel.Text = currentLang.Followers .. "..."
-					friendsLabel.Text = currentLang.Friends .. "..."
-					profileFullBody.Image = "rbxthumb://type=Avatar&id=" .. plr.UserId .. "&w=352&h=352"
-					
-					-- Obtém a descrição via RoProxy
+					createdVal.Text = getFormattedAccountAge(plr)
+					followersVal.Text = "..."
+					friendsVal.Text = "..."
 					userDescriptionLabel.Text = "..."
-					task.spawn(function()
-						local descText = fetchUserDescriptionThirdParty(plr.UserId)
-						if selectedTargetPlayer == plr then
-							userDescriptionLabel.Text = '"' .. descText .. '"'
-						end
-					end)
+					
+					profileFullBody.Image = "rbxthumb://type=Avatar&id=" .. plr.UserId .. "&w=352&h=352"
+					userHeadshotImage.Image = "rbxthumb://type=AvatarHeadShot&id=" .. plr.UserId .. "&w=150&h=150"
 
-					-- Obtém contadores de seguidores e amigos
-					task.spawn(function()
-						local fers, fris = fetchFriendsAndFollowers(plr.UserId)
-						if selectedTargetPlayer == plr then
-							followersLabel.Text = currentLang.Followers .. formatNumber(fers)
-							friendsLabel.Text = currentLang.Friends .. formatNumber(fris)
-						end
-					end)
+					backgroundBanner.BackgroundColor3 = currentTheme.CARD
 
 					local isActive, state = getVoiceStateData(plr)
 					if isActive then
 						voiceStatusLabel.Visible = true
 						voiceStatusLabel.Text = currentLang.VoiceActive
-						voiceStatusLabel.TextColor3 = Color3.fromRGB(80, 220, 100)
+						voiceStatusLabel.TextColor3 = Color3.fromRGB(80, 200, 100)
 					elseif state.lastActiveTick then
 						voiceStatusLabel.Visible = true
 						voiceStatusLabel.Text = currentLang.VoiceInactive .. formatTimeAgo(state.lastActiveTick)
@@ -1361,15 +1658,28 @@ updatePlayerList = function(showLoading)
 						local isDisrespectful = settingsData.DisrespectfulUsers[tostring(plr.UserId)]
 						disrespectfulBtn.Text = isDisrespectful and currentLang.RemoveDisrespectful or currentLang.Disrespectful
 					end
-					
-					task.wait(0.25)
-					
+
 					modalSpinnerTween:Cancel()
 					modalSpinnerOuter.Visible = false
 					
 					TweenService:Create(profileContentGroup, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 						GroupTransparency = 0
 					}):Play()
+
+					HttpQueue:Clear()
+
+					fetchUserDescriptionThirdParty(plr.UserId, function(descText)
+						if selectedTargetPlayer == plr then
+							userDescriptionLabel.Text = descText
+						end
+					end)
+
+					fetchFriendsAndFollowers(plr.UserId, function(fers, fris)
+						if selectedTargetPlayer == plr then
+							followersVal.Text = formatNumber(fers)
+							friendsVal.Text = formatNumber(fris)
+						end
+					end)
 				end)
 			end)
 
@@ -1383,7 +1693,7 @@ updatePlayerList = function(showLoading)
 				
 				local teamFrame = Instance.new("Frame")
 				teamFrame.Name = "TeamFrame_" .. team.Name
-				teamFrame.Size = UDim2.new(1, 0, 0, 24)
+				teamFrame.Size = UDim2.new(1, 0, 0, 20)
 				teamFrame.BackgroundColor3 = team.TeamColor.Color
 				teamFrame.BorderSizePixel = 0
 				
@@ -1393,10 +1703,10 @@ updatePlayerList = function(showLoading)
 				
 				local bgCol = team.TeamColor.Color
 				local luminance = (bgCol.R * 0.299 + bgCol.G * 0.587 + bgCol.B * 0.114)
-				local dynamicTeamTextColor = luminance > 0.65 and Color3.fromRGB(0, 0, 0) or Color3.fromRGB(255, 255, 255)
+				local dynamicTeamTextColor = luminance > 0.65 and Color3.fromRGB(20, 20, 20) or Color3.fromRGB(255, 255, 255)
 
-				local statWidth = 42
-				local badgesWidth = 45
+				local statWidth = 38
+				local badgesWidth = 40
 				local teamNameWidthOffset = (numStats * statWidth) + badgesWidth + 10
 
 				local teamLabel = Instance.new("TextLabel")
@@ -1405,7 +1715,7 @@ updatePlayerList = function(showLoading)
 				teamLabel.BackgroundTransparency = 1
 				teamLabel.Text = formatTeamName(team.Name) .. " (" .. #teamPlayers .. ")"
 				teamLabel.TextColor3 = dynamicTeamTextColor
-				teamLabel.TextSize = 11
+				teamLabel.TextSize = 10
 				teamLabel.Font = Enum.Font.BuilderSansBold
 				teamLabel.TextXAlignment = Enum.TextXAlignment.Left
 				teamLabel.Parent = teamFrame
@@ -1414,12 +1724,12 @@ updatePlayerList = function(showLoading)
 					for i, statName in ipairs(activeStats) do
 						local teamStatHeader = Instance.new("TextLabel")
 						teamStatHeader.Size = UDim2.new(0, statWidth, 1, 0)
-						local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 5
+						local rightOffset = -badgesWidth - ((numStats - i) * statWidth) - 4
 						teamStatHeader.Position = UDim2.new(1, rightOffset, 0, 0)
 						teamStatHeader.BackgroundTransparency = 1
 						teamStatHeader.Text = statName
 						teamStatHeader.TextColor3 = dynamicTeamTextColor
-						teamStatHeader.TextSize = 9
+						teamStatHeader.TextSize = 8
 						teamStatHeader.Font = Enum.Font.BuilderSansBold
 						teamStatHeader.TextXAlignment = Enum.TextXAlignment.Center
 						teamStatHeader.TextTruncate = Enum.TextTruncate.AtEnd
@@ -1443,8 +1753,8 @@ updatePlayerList = function(showLoading)
 			elem.Parent = scrollingPlayers
 		end
 
-		-- Reativa o redimensionamento do Canvas apenas após renderizar todos os elementos
 		scrollingPlayers.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		filterAndAutocomplete()
 	end)
 
 	hideLoadingCircle()
@@ -1470,7 +1780,6 @@ end
 
 local function connectPlayerStats(plr)
 	plr:GetPropertyChangedSignal("Team"):Connect(function() 
-		-- Ao trocar de time, movemos apenas o player sem renderizar toda a leaderboard do zero
 		requestUpdate(false, plr) 
 	end)
 	
@@ -1478,7 +1787,6 @@ local function connectPlayerStats(plr)
 	if leaderstats then
 		for _, stat in ipairs(leaderstats:GetChildren()) do
 			stat:GetPropertyChangedSignal("Value"):Connect(function() 
-				-- Atualiza apenas os números de stats da linha da pessoa que mudou
 				requestUpdate(false, plr) 
 			end)
 		end
@@ -1510,7 +1818,6 @@ requestUpdate(true)
 
 task.spawn(function()
 	while task.wait(3) do
-		-- Atualização secundária leve periódica de estado e tempo de voz
 		if isOpen then
 			for _, plr in ipairs(Players:GetPlayers()) do
 				updatePlayerRowOnly(plr)
@@ -1520,22 +1827,20 @@ task.spawn(function()
 end)
 
 closeProfileBtn.MouseButton1Click:Connect(function()
-	local pos = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
-	animateClose(profileModal, pos, function()
+	animateClose(profileModal, function()
 		cleanup3D()
+		HttpQueue:Clear()
 	end)
 end)
 
 blockBtn.MouseButton1Click:Connect(function()
 	if selectedTargetPlayer and selectedTargetPlayer ~= localPlayer then
-		local posProf = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
-		animateClose(profileModal, posProf, function()
+		animateClose(profileModal, function()
 			cleanup3D()
 			cmText.Text = currentLang.BlockText
 			cmActionBtn.Text = currentLang.Block
 			pendingAction = "Block"
-			local posConf = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
-			animateOpen(confirmModal, posConf)
+			animateOpen(confirmModal)
 		end)
 	end
 end)
@@ -1549,14 +1854,12 @@ end)
 friendBtn.MouseButton1Click:Connect(function()
 	if not selectedTargetPlayer or selectedTargetPlayer == localPlayer then return end
 	if localPlayer:IsFriendsWith(selectedTargetPlayer.UserId) then
-		local posProf = isMobile and UDim2.new(0.5, -140, 0.5, -190) or UDim2.new(0.5, -150, 0.5, -202)
-		animateClose(profileModal, posProf, function()
+		animateClose(profileModal, function()
 			cleanup3D()
 			cmText.Text = currentLang.UnAddText
 			cmActionBtn.Text = currentLang.UnAddFriend
 			pendingAction = "UnAdd"
-			local posConf = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
-			animateOpen(confirmModal, posConf)
+			animateOpen(confirmModal)
 		end)
 	else
 		pcall(function() StarterGui:SetCore("PromptSendFriendRequest", selectedTargetPlayer) end)
@@ -1579,8 +1882,7 @@ disrespectfulBtn.MouseButton1Click:Connect(function()
 end)
 
 cmCancelBtn.MouseButton1Click:Connect(function()
-	local pos = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
-	animateClose(confirmModal, pos)
+	animateClose(confirmModal)
 end)
 
 cmActionBtn.MouseButton1Click:Connect(function()
@@ -1590,8 +1892,7 @@ cmActionBtn.MouseButton1Click:Connect(function()
 		pcall(function() StarterGui:SetCore("PromptBlockPlayer", selectedTargetPlayer) end)
 		closeLeaderboard()
 	end
-	local pos = isMobile and UDim2.new(0.5, -135, 0.5, -80) or UDim2.new(0.5, -155, 0.5, -85)
-	animateClose(confirmModal, pos)
+	animateClose(confirmModal)
 	requestUpdate(false)
 end)
 
