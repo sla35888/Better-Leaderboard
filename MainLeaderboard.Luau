@@ -86,8 +86,14 @@ local function checkRobloxPlus(plr, callback)
 
 	local hasPlus = false
 	pcall(function()
-		if plr:GetAttribute("HasRobloxSubscription") ~= nil then
-			hasPlus = plr:GetAttribute("HasRobloxSubscription") == true or plr:GetAttribute("HasRobloxSubscription") == "ativo" or plr:GetAttribute("HasRobloxSubscription") == "Active" or plr:GetAttribute("HasRobloxSubscription") == true
+		local attrSub = plr:GetAttribute("HasRobloxSubscription")
+		if attrSub ~= nil then
+			if type(attrSub) == "boolean" then
+				hasPlus = attrSub
+			elseif type(attrSub) == "string" then
+				local val = string.lower(attrSub)
+				hasPlus = (val == "active" or val == "ativo" or val == "true")
+			end
 		elseif plr:FindFirstChild("HasRobloxSubscription") then
 			local subObj = plr.HasRobloxSubscription
 			if subObj:IsA("BoolValue") then
@@ -136,22 +142,25 @@ end
 local function getPlayerAgeChecked(plr)
 	local isChecked = false
 	pcall(function()
-		-- Checa primeiramente no sistema de Attributes do Player
-		if plr:GetAttribute("AgeChecked") ~= nil then
-			local attr = plr:GetAttribute("AgeChecked")
-			if attr == "Checked" or attr == true or attr == "checked" or attr == 1 then
-				isChecked = true
+		local ageAttr = plr:GetAttribute("AgeChecked")
+		if ageAttr ~= nil then
+			if type(ageAttr) == "string" then
+				isChecked = (ageAttr == "Checked")
+			elseif type(ageAttr) == "boolean" then
+				isChecked = ageAttr
 			end
-		-- Caso não seja atributo, busca por objetos filhos no Player (BoolValue, StringValue, etc.)
 		elseif plr:FindFirstChild("AgeChecked") then
 			local valObj = plr.AgeChecked
-			if valObj:IsA("BoolValue") then
+			if valObj:IsA("StringValue") then
+				isChecked = (valObj.Value == "Checked")
+			elseif valObj:IsA("BoolValue") then
 				isChecked = valObj.Value
-			elseif valObj:IsA("StringValue") then
-				local val = string.lower(tostring(valObj.Value))
-				if val == "checked" or val == "true" or val == "yes" then
-					isChecked = true
-				end
+			end
+		elseif plr.AgeChecked ~= nil then
+			if type(plr.AgeChecked) == "string" then
+				isChecked = (plr.AgeChecked == "Checked")
+			elseif type(plr.AgeChecked) == "boolean" then
+				isChecked = plr.AgeChecked
 			end
 		end
 	end)
@@ -2027,7 +2036,10 @@ cmActionBtn.MouseButton1Click:Connect(function()
 		pcall(function() StarterGui:SetCore("PromptUnfriendPlayer", selectedTargetPlayer) end)
 	elseif pendingAction == "Block" and selectedTargetPlayer then
 		pcall(function() StarterGui:SetCore("PromptBlockPlayer", selectedTargetPlayer) end)
+		closeLeaderboard()
 	end
 	animateClose(confirmModal)
-	closeLeaderboard()
+	requestUpdate(false)
 end)
+
+applyThemeAndLang()
