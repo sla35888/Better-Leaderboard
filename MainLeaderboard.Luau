@@ -126,15 +126,15 @@ local function getPlayerCountry(plr)
 end
 
 local function getPlayerAgeChecked(plr)
-	local status = "Unchecked"
+	local isChecked = false
 	pcall(function()
-		if plr:GetAttribute("AgeChecked") then
-			status = tostring(plr:GetAttribute("AgeChecked"))
+		if plr:GetAttribute("AgeChecked") ~= nil then
+			isChecked = (plr:GetAttribute("AgeChecked") == true or plr:GetAttribute("AgeChecked") == "Checked")
 		elseif plr:FindFirstChild("AgeChecked") then
-			status = tostring(plr.AgeChecked.Value)
+			isChecked = (plr.AgeChecked.Value == true or plr.AgeChecked.Value == "Checked")
 		end
 	end)
-	return status
+	return isChecked and "Checked" or "UnChecked"
 end
 
 --------------------------------------------------------------------------------
@@ -960,7 +960,7 @@ csCorner.Parent = closeSettingsBtn
 local csStroke = Instance.new("UIStroke")
 csStroke.Color = currentTheme.STROKE
 csStroke.Thickness = 1
-csStroke.Parent = closeSettingsBtn
+csStroke.Parent = settingsModal
 
 local themeKeys = {"dark", "dark_red", "dark_blue", "dark_green", "dark_purple", "light"}
 local langKeys = {"en", "pt", "es"}
@@ -1739,11 +1739,7 @@ updatePlayerList = function(showLoading)
 
 					-- Atualização de AgeChecked e Country_Code na Modal
 					local ageStatus = getPlayerAgeChecked(plr)
-					if ageStatus == "Checked" then
-						ageCheckedVal.Text = "✓"
-					else
-						ageCheckedVal.Text = "✗"
-					end
+					ageCheckedVal.Text = ageStatus
 
 					local countryCode = getPlayerCountry(plr)
 					countryVal.Text = getCountryEmoji(countryCode)
