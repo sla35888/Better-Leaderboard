@@ -136,17 +136,19 @@ end
 local function getPlayerAgeChecked(plr)
 	local isChecked = false
 	pcall(function()
+		-- Checa primeiramente no sistema de Attributes do Player
 		if plr:GetAttribute("AgeChecked") ~= nil then
 			local attr = plr:GetAttribute("AgeChecked")
-			if attr == true or attr == "Checked" or attr == "checked" or attr == 1 then
+			if attr == "Checked" or attr == true or attr == "checked" or attr == 1 then
 				isChecked = true
 			end
+		-- Caso não seja atributo, busca por objetos filhos no Player (BoolValue, StringValue, etc.)
 		elseif plr:FindFirstChild("AgeChecked") then
 			local valObj = plr.AgeChecked
 			if valObj:IsA("BoolValue") then
 				isChecked = valObj.Value
 			elseif valObj:IsA("StringValue") then
-				local val = string.lower(valObj.Value)
+				local val = string.lower(tostring(valObj.Value))
 				if val == "checked" or val == "true" or val == "yes" then
 					isChecked = true
 				end
@@ -2025,10 +2027,7 @@ cmActionBtn.MouseButton1Click:Connect(function()
 		pcall(function() StarterGui:SetCore("PromptUnfriendPlayer", selectedTargetPlayer) end)
 	elseif pendingAction == "Block" and selectedTargetPlayer then
 		pcall(function() StarterGui:SetCore("PromptBlockPlayer", selectedTargetPlayer) end)
-		closeLeaderboard()
 	end
 	animateClose(confirmModal)
-	requestUpdate(false)
+	closeLeaderboard()
 end)
-
-applyThemeAndLang()
